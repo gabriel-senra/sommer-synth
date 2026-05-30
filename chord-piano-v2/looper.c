@@ -103,12 +103,11 @@ static void play_track(int ti, Uint32 prev, Uint32 cur, Uint32 len) {
 void loop_tick(void) {
     Uint32 now = SDL_GetTicks();
 
-    // ARMED: wait for bar boundary, show countdown
+    // ARMED: wait for pre-computed bar boundary (rec_start_ms set on ARMED entry)
     if (looper.state == LOOP_ARMED) {
-        if (now >= next_bar_boundary(now)) {
-            looper.rec_start_ms = next_bar_boundary(now);
-            looper.last_pos_ms  = 0;
-            looper.state        = LOOP_RECORDING;
+        if (now >= looper.rec_start_ms) {
+            looper.last_pos_ms = 0;
+            looper.state       = LOOP_RECORDING;
         }
         return;
     }
@@ -132,8 +131,9 @@ void loop_press_rec(void) {
     switch (looper.state) {
 
     case LOOP_IDLE:
-        looper.armed_at_ms = now;
-        looper.state       = LOOP_ARMED;
+        looper.armed_at_ms  = now;
+        looper.rec_start_ms = next_bar_boundary(now);  // pre-compute target
+        looper.state        = LOOP_ARMED;
         break;
 
     case LOOP_ARMED:
@@ -214,9 +214,8 @@ void loop_clear_track(int track) {
 int loop_beat_countdown(void) {
     if (looper.state != LOOP_ARMED) return 0;
     Uint32 now = SDL_GetTicks();
-    Uint32 target = next_bar_boundary(now);
     Uint32 b = beat_ms();
-    Uint32 remaining_ms = (target > now) ? (target - now) : 0;
+    Uint32 remaining_ms = (looper.rec_start_ms > now) ? (looper.rec_start_ms - now) : 0;
     int beats = (int)((remaining_ms + b - 1) / b);  // round up
     return beats > 4 ? 4 : beats;
 }
