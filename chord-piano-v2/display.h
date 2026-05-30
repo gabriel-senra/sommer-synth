@@ -5,7 +5,7 @@
 // ── Layout constants ──────────────────────────────────────────────────────────
 
 #define WIN_W  900
-#define WIN_H  436
+#define WIN_H  466
 
 #define TOP_Y  0
 #define TOP_H  44
@@ -29,7 +29,12 @@
 #define K_W      40
 #define K_PAD_X  (PAD_X0 + 7*(PAD_W+PAD_GAP) + 14)
 
-#define UPPER_LABEL_Y (FX_Y + FX_H + 3)
+#define LOOP_Y        (FX_Y + FX_H + 1)
+#define LOOP_H        28
+#define LOOP_BTN_H    20
+#define LOOP_BTN_Y    (LOOP_Y + (LOOP_H - LOOP_BTN_H) / 2)
+
+#define UPPER_LABEL_Y (LOOP_Y + LOOP_H + 3)
 #define UPPER_PAD_Y   (UPPER_LABEL_Y + 14 + 2)
 #define LOWER_LABEL_Y (UPPER_PAD_Y + PAD_H + 8)
 #define LOWER_PAD_Y   (LOWER_LABEL_Y + 14 + 2)
@@ -75,6 +80,12 @@ extern const SDL_Rect BTN_ARP_GATE, BTN_ARP_HOLD;
 // ── Button rects — fx row ─────────────────────────────────────────────────────
 
 extern const SDL_Rect BTN_FX_REV, BTN_FX_CHO, BTN_FX_DLY;
+
+// ── Button rects — loop row ───────────────────────────────────────────────────
+
+extern const SDL_Rect BTN_LOOP_TOG;
+extern const SDL_Rect BTN_LOOP_T[4];   // track select buttons
+extern const SDL_Rect BTN_LOOP_REC;
 
 // ── Hit-testing (used by main event loop) ────────────────────────────────────
 

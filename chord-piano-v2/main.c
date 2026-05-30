@@ -8,6 +8,7 @@
 #include "state.h"
 #include "synth.h"
 #include "fx.h"
+#include "looper.h"
 #include "display.h"
 #include "arp.h"
 
@@ -47,6 +48,7 @@ int main(int argc, char **argv) {
     int running = 1;
     while (running) {
         arp_tick();
+        loop_tick();
 
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
@@ -76,7 +78,21 @@ int main(int argc, char **argv) {
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_FX_REV)) { rev_preset = (rev_preset+1)%4; apply_reverb(); }
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_FX_CHO)) { cho_preset = (cho_preset+1)%4; apply_chorus(); }
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_FX_DLY)) { dly_preset = (dly_preset+1)%4; apply_delay();  }
+                    else if (pt_in_rect(mouse_x, mouse_y, BTN_LOOP_REC)) loop_press_rec();
+                    else if (pt_in_rect(mouse_x, mouse_y, BTN_LOOP_TOG)) {
+                        if (looper.state != LOOP_IDLE) {
+                            // stop all playing notes and reset
+                            for (int i = 0; i < NUM_LOOP_TRACKS; i++) loop_clear_track(i);
+                            looper.state = LOOP_IDLE; looper.loop_len_ms = 0;
+                        } else {
+                            loop_press_rec();
+                        }
+                    }
                     else {
+                        int lt = -1;
+                        for (int i = 0; i < NUM_LOOP_TRACKS; i++)
+                            if (pt_in_rect(mouse_x, mouse_y, BTN_LOOP_T[i])) { lt = i; break; }
+                        if (lt >= 0) { loop_select_track(lt); break; }
                         int dv = hit_dot(mouse_x, mouse_y);
                         if (dv >= 0) { voice_level = dv; break; }
                         int rm = hit_row_mode_btn(mouse_x, mouse_y);

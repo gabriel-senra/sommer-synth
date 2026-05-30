@@ -1,5 +1,6 @@
 #include "synth.h"
 #include "chords.h"
+#include "looper.h"
 #include "amy.h"
 #include <string.h>
 
@@ -69,6 +70,7 @@ void trigger_chord(int ci) {
             if (m < 0 || m > 127) continue;
             if (note_count[m] == 0) amy_note_on_midi(m);
             note_count[m]++;
+            loop_record_on(m, 0.75f);
         }
     }
 }
@@ -83,6 +85,7 @@ void release_chord(int ci) {
             int m = actv[ci].notes[i];
             if (m < 0 || m > 127) continue;
             if (--note_count[m] <= 0) { note_count[m] = 0; amy_note_off_midi(m); }
+            loop_record_off(m);
         }
     }
     actv[ci].active = 0; actv[ci].num = 0;
