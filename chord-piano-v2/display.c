@@ -8,26 +8,31 @@
 #define STB_EASY_FONT_IMPLEMENTATION
 #include "../piano/stb_easy_font.h"
 
-// ── Colours ───────────────────────────────────────────────────────────────────
+// ── Colours — warm amber-on-dark ─────────────────────────────────────────────
 
-const SDL_Color C_BG     = { 11, 11, 11,255};
-const SDL_Color C_SURF   = { 20, 20, 20,255};
-const SDL_Color C_BORDER = { 40, 40, 40,255};
-const SDL_Color C_SEP    = { 30, 30, 30,255};
-const SDL_Color C_HI     = {228,228,228,255};
-const SDL_Color C_MID    = {110,110,110,255};
-const SDL_Color C_DIM    = { 50, 50, 50,255};
-const SDL_Color C_ACCENT = {255, 82,  0,255};
-const SDL_Color C_WHITE  = {255,255,255,255};
-const SDL_Color C_BLACK  = { 11, 11, 11,255};
+const SDL_Color C_BG     = { 14, 11,  9, 255};  // warm near-black
+const SDL_Color C_SURF   = { 24, 20, 15, 255};  // pad surface (warm dark)
+const SDL_Color C_BORDER = { 48, 40, 30, 255};  // warm border
+const SDL_Color C_SEP    = { 28, 24, 18, 255};  // separator
+const SDL_Color C_HI     = {232,210,160, 255};  // warm amber-cream
+const SDL_Color C_MID    = {118, 98, 68, 255};  // warm mid-brown
+const SDL_Color C_DIM    = { 52, 44, 32, 255};  // warm dim
+const SDL_Color C_ACCENT = {255, 88,  0, 255};  // TE orange
+const SDL_Color C_WHITE  = {232,210,160, 255};  // warm cream (= C_HI on pads)
+const SDL_Color C_BLACK  = { 14, 11,  9, 255};  // dark text on cream pads
 
 const SDL_Color OVR_COL[7] = {
-    {110, 68,210,255},{255, 82,  0,255},{190, 38, 38,255},
-    {195,140,  0,255},{  0,158,180,255},{  0,158, 74,255},{180, 38,138,255},
+    {118, 72,220, 255},  // violet
+    {255, 88,  0, 255},  // orange
+    {215, 48, 55, 255},  // red
+    {205,148,  0, 255},  // amber
+    {  0,172,185, 255},  // teal
+    { 28,170, 82, 255},  // green
+    {200, 44,162, 255},  // magenta
 };
 
-const SDL_Color MODE_COL[3]      = {{40,40,40,255},{20,50,90,255},{80,50,10,255}};
-const SDL_Color MODE_TEXT_COL[3] = {{50,50,50,255},{0,120,210,255},{200,120,0,255}};
+const SDL_Color MODE_COL[3]      = {{ 48, 40, 30, 255}, { 18, 55,105, 255}, { 82, 50, 10, 255}};
+const SDL_Color MODE_TEXT_COL[3] = {{ 52, 44, 32, 255}, { 38,138,225, 255}, {215,140,  0, 255}};
 
 // ── Button rects ──────────────────────────────────────────────────────────────
 
@@ -74,6 +79,11 @@ static void fill_rect(SDL_Renderer *r, int x, int y, int w, int h, SDL_Color c) 
 static void draw_rect_outline(SDL_Renderer *r, int x, int y, int w, int h, SDL_Color c) {
     set_color(r, c); SDL_RenderDrawRect(r, &(SDL_Rect){x,y,w,h});
 }
+static void draw_thick_outline(SDL_Renderer *r, int x, int y, int w, int h, SDL_Color c) {
+    set_color(r, c);
+    SDL_RenderDrawRect(r, &(SDL_Rect){x,   y,   w,   h  });
+    SDL_RenderDrawRect(r, &(SDL_Rect){x+1, y+1, w-2, h-2});
+}
 static void hline(SDL_Renderer *r, int y, SDL_Color c) {
     set_color(r, c); SDL_RenderDrawLine(r, 0, y, WIN_W, y);
 }
@@ -103,7 +113,7 @@ int pt_in_rect(int px, int py, SDL_Rect re) {
 
 static void draw_arrow_btn(SDL_Renderer *r, SDL_Rect btn, const char *lbl, int hov) {
     fill_rect(r, btn.x, btn.y, btn.w, btn.h, hov ? C_SURF : C_BG);
-    draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, C_BORDER);
+    draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, hov ? C_MID : C_BORDER);
     draw_text(r, btn.x+(btn.w-text_width(lbl,1.5f))/2,
                  btn.y+(btn.h-(int)(13*1.5f))/2, 1.5f, lbl, hov ? C_HI : C_MID);
 }
@@ -144,7 +154,7 @@ static void render_voice_dots(SDL_Renderer *r) {
     draw_text(r, 14, DOTS_Y, 1.3f, "VOICE", C_DIM);
     for (int v = 0; v <= KNOB_MAX; v++) {
         SDL_Rect d = dot_rect(v);
-        SDL_Color fill = (v <= voice_level) ? C_WHITE : (SDL_Color){28,28,28,255};
+        SDL_Color fill = (v <= voice_level) ? C_ACCENT : C_SURF;
         SDL_Color bord = (v == voice_level) ? C_HI    : C_BORDER;
         fill_rect(r, d.x, d.y, d.w, d.h, fill);
         draw_rect_outline(r, d.x, d.y, d.w, d.h, bord);
@@ -154,22 +164,24 @@ static void render_voice_dots(SDL_Renderer *r) {
 
 static void render_topbar(SDL_Renderer *r) {
     fill_rect(r, 0, 0, WIN_W, TOP_H, C_BG);
+    // 2px accent line at the very top — instrument identity strip
+    fill_rect(r, 0, 0, WIN_W, 2, C_ACCENT);
     hline(r, TOP_H, C_SEP);
     int kp = pt_in_rect(mouse_x, mouse_y, BTN_KEY_PREV);
     int kn = pt_in_rect(mouse_x, mouse_y, BTN_KEY_NEXT);
     draw_arrow_btn(r, BTN_KEY_PREV, "<", kp);
     draw_arrow_btn(r, BTN_KEY_NEXT, ">", kn);
     char key_lbl[20]; snprintf(key_lbl, sizeof(key_lbl), "%s MAJOR", KEY_NAMES[current_key]);
-    float ksc = 2.2f; int klw = text_width(key_lbl, ksc);
+    float ksc = 2.5f; int klw = text_width(key_lbl, ksc);
     int klx = BTN_KEY_PREV.x+BTN_KEY_PREV.w+(BTN_KEY_NEXT.x-BTN_KEY_PREV.x-BTN_KEY_PREV.w-klw)/2;
-    draw_text(r, klx, TOP_H/2-(int)(13*ksc)/2+1, ksc, key_lbl, C_WHITE);
+    draw_text(r, klx, TOP_H/2-(int)(13*ksc)/2+1, ksc, key_lbl, C_HI);
     int pp = pt_in_rect(mouse_x, mouse_y, BTN_PATCH_PREV);
     int pn = pt_in_rect(mouse_x, mouse_y, BTN_PATCH_NEXT);
     draw_arrow_btn(r, BTN_PATCH_PREV, "<", pp);
     draw_arrow_btn(r, BTN_PATCH_NEXT, ">", pn);
     char ptch[16]; snprintf(ptch, sizeof(ptch), "#%03d", current_patch);
     draw_text(r, BTN_PATCH_PREV.x-58, TOP_H/2-(int)(13*1.3f)/2+1, 1.3f, "PATCH", C_DIM);
-    float psc = 1.8f; int plw = text_width(ptch, psc);
+    float psc = 2.0f; int plw = text_width(ptch, psc);
     int plx = BTN_PATCH_PREV.x+BTN_PATCH_PREV.w+(BTN_PATCH_NEXT.x-BTN_PATCH_PREV.x-BTN_PATCH_PREV.w-plw)/2;
     draw_text(r, plx, TOP_H/2-(int)(13*psc)/2+1, psc, ptch, C_MID);
 }
@@ -198,7 +210,7 @@ static void render_controls(SDL_Renderer *r) {
         make_chord_name(current_key, CK[i].degree, voice_level, quality_override,
                         cname, sizeof(cname));
         SDL_Color cc = quality_override >= 0 ? OVR_COL[quality_override] : C_ACCENT;
-        draw_text(r, 530, CTRL_Y+(CTRL_H-(int)(13*2.8f))/2, 2.8f, cname, cc);
+        draw_text(r, 525, CTRL_Y+(CTRL_H-(int)(13*3.2f))/2, 3.2f, cname, cc);
         break;
     }
 }
@@ -211,11 +223,11 @@ static void render_modifier_strip(SDL_Renderer *r) {
         int hov = pt_in_rect(mouse_x, mouse_y, btn), act = (quality_override == i);
         fill_rect(r, btn.x, btn.y, btn.w, btn.h,
                   act ? OVR_COL[i] : (hov ? C_SURF : C_BG));
-        draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h,
-                          act ? OVR_COL[i] : (hov ? C_BORDER : C_DIM));
+        if (act) draw_thick_outline(r, btn.x, btn.y, btn.w, btn.h, C_HI);
+        else     draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, hov ? C_BORDER : C_DIM);
         draw_text(r, btn.x+(btn.w-text_width(OVR_LABELS[i],1.3f))/2,
                      btn.y+(btn.h-(int)(13*1.3f))/2, 1.3f, OVR_LABELS[i],
-                     act ? C_WHITE : (hov ? C_MID : C_DIM));
+                     act ? C_HI : (hov ? C_MID : C_DIM));
     }
 }
 
@@ -334,22 +346,24 @@ static void render_pads(SDL_Renderer *r) {
         RowMode mode = row_mode_for(i);
 
         SDL_Color fill, bord, text_col, sub_col;
+        int thick = 0;
         if (held && quality_override >= 0 && mode == ROW_CHORD) {
             SDL_Color oc = OVR_COL[quality_override];
-            fill = oc; bord = C_WHITE; text_col = C_WHITE;
-            sub_col = (SDL_Color){oc.r/2+127, oc.g/2+127, oc.b/2+127, 255};
+            fill = oc; bord = C_HI; text_col = C_HI; thick = 1;
+            sub_col = (SDL_Color){(Uint8)(oc.r/2+80),(Uint8)(oc.g/2+80),(Uint8)(oc.b/2+80),255};
         } else if (held) {
-            fill = C_WHITE; bord = C_WHITE; text_col = C_BLACK;
-            sub_col = (SDL_Color){80,80,80,255};
+            fill = C_WHITE; bord = C_ACCENT; text_col = C_BLACK; thick = 1;
+            sub_col = (SDL_Color){80, 65, 42, 255};
         } else if (hov) {
-            fill = C_SURF; bord = C_BORDER; text_col = C_HI; sub_col = C_DIM;
+            fill = C_SURF; bord = C_MID; text_col = C_HI; sub_col = C_DIM;
         } else {
-            fill = C_BG;
+            fill = C_SURF;
             bord = (mode == ROW_CHORD) ? C_BORDER : MODE_COL[(int)mode];
             text_col = C_MID; sub_col = C_DIM;
         }
         fill_rect(r, pad.x, pad.y, pad.w, pad.h, fill);
-        draw_rect_outline(r, pad.x, pad.y, pad.w, pad.h, bord);
+        if (thick) draw_thick_outline(r, pad.x, pad.y, pad.w, pad.h, bord);
+        else        draw_rect_outline(r, pad.x, pad.y, pad.w, pad.h, bord);
 
         char cname[24];
         if (mode == ROW_CHORD)
@@ -358,9 +372,9 @@ static void render_pads(SDL_Renderer *r) {
         else
             snprintf(cname, sizeof(cname), "%s",
                      KEY_NAMES[(current_key + MAJOR_SCALE[CK[i].degree]) % 12]);
-        float csc = ((int)strlen(cname) > 5) ? 1.6f : 2.0f;
+        float csc = ((int)strlen(cname) > 5) ? 1.8f : 2.4f;
         draw_text(r, pad.x+(pad.w-text_width(cname,csc))/2,
-                     pad.y+(pad.h-(int)(13*csc))/2-6, csc, cname, text_col);
+                     pad.y+(pad.h-(int)(13*csc))/2-4, csc, cname, text_col);
 
         if (mode != ROW_CHORD) {
             SDL_Color mc = held ? (SDL_Color){100,100,100,255} : MODE_TEXT_COL[(int)mode];
@@ -404,11 +418,11 @@ static void render_loop_row(SDL_Renderer *r) {
     // [LOOP] toggle
     { SDL_Rect btn = BTN_LOOP_TOG;
       SDL_Color fill = loop_active ? C_ACCENT : (pt_in_rect(mouse_x,mouse_y,btn) ? C_SURF : C_BG);
-      SDL_Color bord = loop_active ? C_ACCENT : C_BORDER;
       fill_rect(r, btn.x, btn.y, btn.w, btn.h, fill);
-      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, bord);
+      if (loop_active) draw_thick_outline(r, btn.x, btn.y, btn.w, btn.h, C_HI);
+      else             draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, C_BORDER);
       draw_text(r, btn.x+(btn.w-text_width("LOOP",1.3f))/2, ty, 1.3f, "LOOP",
-                loop_active ? C_WHITE : C_MID); }
+                loop_active ? C_HI : C_MID); }
 
     // Track buttons
     static const char *TRACK_NAMES[4] = {"T1 BASS","T2 CHORD","T3 LEAD","T4 DRUM"};
@@ -450,15 +464,14 @@ static void render_loop_row(SDL_Renderer *r) {
     { SDL_Rect btn = BTN_LOOP_REC;
       int hov = pt_in_rect(mouse_x, mouse_y, btn);
       int rec_lit = (s == LOOP_RECORDING || s == LOOP_OVERDUB || s == LOOP_ARMED);
-      // Pulse when recording
       Uint32 now = SDL_GetTicks();
-      int pulse = rec_lit && ((now / 400) % 2 == 0);
+      int pulse = rec_lit && ((now / 350) % 2 == 0);
       SDL_Color fill = pulse ? C_ACCENT : (hov ? C_SURF : C_BG);
-      SDL_Color bord = rec_lit ? C_ACCENT : C_BORDER;
       fill_rect(r, btn.x, btn.y, btn.w, btn.h, fill);
-      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, bord);
+      if (rec_lit) draw_thick_outline(r, btn.x, btn.y, btn.w, btn.h, C_ACCENT);
+      else         draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, hov ? C_MID : C_BORDER);
       draw_text(r, btn.x+(btn.w-text_width("REC",1.3f))/2, ty, 1.3f, "REC",
-                rec_lit ? C_WHITE : C_MID); }
+                rec_lit ? C_HI : C_MID); }
 }
 
 // ── Public entry point ────────────────────────────────────────────────────────
