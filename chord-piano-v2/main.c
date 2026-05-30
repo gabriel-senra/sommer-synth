@@ -39,6 +39,7 @@ int main(int argc, char **argv) {
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_EVENTS) < 0) {
         fprintf(stderr, "SDL: %s\n", SDL_GetError()); return 1;
     }
+    display_init();
     SDL_Window *win = SDL_CreateWindow("AMY Chord Piano",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, WIN_W, WIN_H, SDL_WINDOW_SHOWN);
     SDL_Renderer *ren = SDL_CreateRenderer(win, -1,
@@ -153,6 +154,7 @@ int main(int argc, char **argv) {
     }
 
     for (int i = 0; i < NUM_CK; i++) { arp_stop_note(i); release_chord(i); }
+    display_cleanup();
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
     SDL_Quit();
