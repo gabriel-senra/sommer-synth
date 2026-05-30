@@ -1,0 +1,15 @@
+# Compiled binaries
+chord-piano/chord_piano
+chord-piano-v2/chord_piano_v2
+chord-piano-v2/chord_piano
+piano/piano
+
+# Object files
+**/*.o
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Build artifacts
+**/build/
