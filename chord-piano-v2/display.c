@@ -1,161 +1,69 @@
-// display.c — SDL rendering, clean warm-light aesthetic, Helvetica Neue
-
 #include "display.h"
 #include "chords.h"
 #include "fx.h"
 #include "looper.h"
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
 
-// ── Fonts ─────────────────────────────────────────────────────────────────────
+#define STB_EASY_FONT_IMPLEMENTATION
+#include "../piano/stb_easy_font.h"
 
-#define FONT_PATH  "/System/Library/Fonts/HelveticaNeue.ttc"
-#define FONT_REG   0   // Regular
-#define FONT_MED   10  // Medium
+// ── Colours ───────────────────────────────────────────────────────────────────
 
-static TTF_Font *font_sm  = NULL;   // 11px regular  — sub-labels
-static TTF_Font *font_md  = NULL;   // 13px medium   — button labels, values
-static TTF_Font *font_lg  = NULL;   // 19px medium   — chord names on pads
-static TTF_Font *font_xl  = NULL;   // 26px regular  — key name
-
-void display_init(void) {
-    TTF_Init();
-    font_sm = TTF_OpenFontIndex(FONT_PATH, 11, FONT_REG);
-    font_md = TTF_OpenFontIndex(FONT_PATH, 13, FONT_MED);
-    font_lg = TTF_OpenFontIndex(FONT_PATH, 19, FONT_MED);
-    font_xl = TTF_OpenFontIndex(FONT_PATH, 26, FONT_REG);
-}
-
-void display_cleanup(void) {
-    TTF_CloseFont(font_sm); TTF_CloseFont(font_md);
-    TTF_CloseFont(font_lg); TTF_CloseFont(font_xl);
-    TTF_Quit();
-}
-
-// ── Text cache ────────────────────────────────────────────────────────────────
-
-#define TCACHE_CAP 192
-
-typedef struct {
-    char         str[64];
-    TTF_Font    *font;
-    Uint32       color;
-    SDL_Texture *tex;
-    int          w, h;
-    Uint32       tick;
-} TCEntry;
-
-static TCEntry       tce[TCACHE_CAP];
-static Uint32        tce_tick = 0;
-static SDL_Renderer *g_ren    = NULL;
-
-static TCEntry *tc_get(const char *s, TTF_Font *font, SDL_Color col) {
-    if (!font || !s || !*s || !g_ren) return NULL;
-    Uint32 ck = ((Uint32)col.r<<24)|((Uint32)col.g<<16)|((Uint32)col.b<<8)|col.a;
-    tce_tick++;
-    for (int i = 0; i < TCACHE_CAP; i++) {
-        if (tce[i].font==font && tce[i].color==ck && strcmp(tce[i].str, s)==0) {
-            tce[i].tick = tce_tick; return &tce[i];
-        }
-    }
-    int slot = 0; Uint32 oldest = tce[0].tick;
-    for (int i = 1; i < TCACHE_CAP; i++) {
-        if (!tce[i].font) { slot = i; break; }
-        if (tce[i].tick < oldest) { oldest = tce[i].tick; slot = i; }
-    }
-    if (tce[slot].tex) SDL_DestroyTexture(tce[slot].tex);
-    SDL_Surface *surf = TTF_RenderUTF8_Blended(font, s, col);
-    if (!surf) { tce[slot].font = NULL; return NULL; }
-    tce[slot].tex   = SDL_CreateTextureFromSurface(g_ren, surf);
-    tce[slot].w     = surf->w;
-    tce[slot].h     = surf->h;
-    SDL_FreeSurface(surf);
-    tce[slot].font  = font;
-    tce[slot].color = ck;
-    tce[slot].tick  = tce_tick;
-    strncpy(tce[slot].str, s, 63);
-    tce[slot].str[63] = '\0';
-    return &tce[slot];
-}
-
-static void txt(SDL_Renderer *r, int x, int y, TTF_Font *f, const char *s, SDL_Color c) {
-    TCEntry *e = tc_get(s, f, c);
-    if (!e || !e->tex) return;
-    SDL_RenderCopy(r, e->tex, NULL, &(SDL_Rect){x, y, e->w, e->h});
-}
-
-static void txt_c(SDL_Renderer *r, int cx, int cy, TTF_Font *f, const char *s, SDL_Color c) {
-    TCEntry *e = tc_get(s, f, c);
-    if (!e || !e->tex) return;
-    SDL_RenderCopy(r, e->tex, NULL, &(SDL_Rect){cx-e->w/2, cy-e->h/2, e->w, e->h});
-}
-
-static int sw(TTF_Font *f, const char *s) {
-    int w = 0; if (f && s) TTF_SizeUTF8(f, s, &w, NULL); return w;
-}
-static int sh(TTF_Font *f) { return f ? TTF_FontHeight(f) : 0; }
-
-// ── Palette — warm cream light ────────────────────────────────────────────────
-
-const SDL_Color C_BG     = {238,228,210, 255};  // warm cream
-const SDL_Color C_SURF   = {252,248,240, 255};  // card surface
-const SDL_Color C_BORDER = {206,192,168, 255};  // warm border
-const SDL_Color C_SEP    = {222,212,194, 255};  // separator
-const SDL_Color C_HI     = { 34, 24, 12, 255};  // dark warm text
-const SDL_Color C_MID    = {112, 94, 64, 255};  // medium warm
-const SDL_Color C_DIM    = {172,156,128, 255};  // dim warm
-const SDL_Color C_ACCENT = {182,112, 14, 255};  // warm amber
-const SDL_Color C_WHITE  = {252,248,240, 255};  // = C_SURF
-const SDL_Color C_BLACK  = { 34, 24, 12, 255};  // = C_HI
+const SDL_Color C_BG     = { 11, 11, 11,255};
+const SDL_Color C_SURF   = { 20, 20, 20,255};
+const SDL_Color C_BORDER = { 40, 40, 40,255};
+const SDL_Color C_SEP    = { 30, 30, 30,255};
+const SDL_Color C_HI     = {228,228,228,255};
+const SDL_Color C_MID    = {110,110,110,255};
+const SDL_Color C_DIM    = { 50, 50, 50,255};
+const SDL_Color C_ACCENT = {255, 82,  0,255};
+const SDL_Color C_WHITE  = {255,255,255,255};
+const SDL_Color C_BLACK  = { 11, 11, 11,255};
 
 const SDL_Color OVR_COL[7] = {
-    { 96, 52,192, 255},  // violet
-    {182,112, 14, 255},  // amber (accent)
-    {186, 36, 48, 255},  // red
-    {162,118,  0, 255},  // golden
-    {  0,136,154, 255},  // teal
-    { 14,144, 62, 255},  // green
-    {168, 30,130, 255},  // magenta
+    {110, 68,210,255},{255, 82,  0,255},{190, 38, 38,255},
+    {195,140,  0,255},{  0,158,180,255},{  0,158, 74,255},{180, 38,138,255},
 };
 
-const SDL_Color MODE_COL[3]      = {{206,192,168,255},{178,208,238,255},{238,212,162,255}};
-const SDL_Color MODE_TEXT_COL[3] = {{148,134,110,255},{ 18, 96,182,255},{162, 88,  0,255}};
+const SDL_Color MODE_COL[3]      = {{40,40,40,255},{20,50,90,255},{80,50,10,255}};
+const SDL_Color MODE_TEXT_COL[3] = {{50,50,50,255},{0,120,210,255},{200,120,0,255}};
 
 // ── Button rects ──────────────────────────────────────────────────────────────
 
-const SDL_Rect BTN_KEY_PREV   = { 10,  10, 26, 28};
-const SDL_Rect BTN_KEY_NEXT   = {208,  10, 26, 28};
-const SDL_Rect BTN_PATCH_PREV = {648,  10, 26, 28};
-const SDL_Rect BTN_PATCH_NEXT = {862,  10, 26, 28};
-const SDL_Rect BTN_BASS       = {398, CTRL_Y + 7, 62, 28};
-const SDL_Rect BTN_OCT_DOWN   = {478, CTRL_Y + 7, 24, 28};
-const SDL_Rect BTN_OCT_UP     = {540, CTRL_Y + 7, 24, 28};
+const SDL_Rect BTN_KEY_PREV   = { 12,  9, 24, 26};
+const SDL_Rect BTN_KEY_NEXT   = {208,  9, 24, 26};
+const SDL_Rect BTN_PATCH_PREV = {648,  9, 24, 26};
+const SDL_Rect BTN_PATCH_NEXT = {864,  9, 24, 26};
+const SDL_Rect BTN_BASS       = {398, CTRL_Y + 6, 62, 28};
+const SDL_Rect BTN_OCT_DOWN   = {478, CTRL_Y + 6, 24, 28};
+const SDL_Rect BTN_OCT_UP     = {540, CTRL_Y + 6, 24, 28};
 
-const SDL_Rect BTN_ARP_TOG     = { 10, ARP_BTN_Y, 42, ARP_BTN_H};
-const SDL_Rect BTN_ARP_DIV     = { 84, ARP_BTN_Y, 44, ARP_BTN_H};
+const SDL_Rect BTN_ARP_TOG     = { 12, ARP_BTN_Y, 40, ARP_BTN_H};
+const SDL_Rect BTN_ARP_DIV     = { 84, ARP_BTN_Y, 42, ARP_BTN_H};
 const SDL_Rect BTN_BPM_DOWN    = {158, ARP_BTN_Y, 20, ARP_BTN_H};
-const SDL_Rect BTN_BPM_UP      = {214, ARP_BTN_Y, 20, ARP_BTN_H};
-const SDL_Rect BTN_ARP_ORD     = {246, ARP_BTN_Y, 44, ARP_BTN_H};
-const SDL_Rect BTN_ARPOCT_DOWN = {322, ARP_BTN_Y, 20, ARP_BTN_H};
-const SDL_Rect BTN_ARPOCT_UP   = {364, ARP_BTN_Y, 20, ARP_BTN_H};
-const SDL_Rect BTN_ARP_GATE    = {396, ARP_BTN_Y, 44, ARP_BTN_H};
-const SDL_Rect BTN_ARP_HOLD    = {452, ARP_BTN_Y, 48, ARP_BTN_H};
+const SDL_Rect BTN_BPM_UP      = {212, ARP_BTN_Y, 20, ARP_BTN_H};
+const SDL_Rect BTN_ARP_ORD     = {244, ARP_BTN_Y, 42, ARP_BTN_H};
+const SDL_Rect BTN_ARPOCT_DOWN = {320, ARP_BTN_Y, 20, ARP_BTN_H};
+const SDL_Rect BTN_ARPOCT_UP   = {360, ARP_BTN_Y, 20, ARP_BTN_H};
+const SDL_Rect BTN_ARP_GATE    = {392, ARP_BTN_Y, 42, ARP_BTN_H};
+const SDL_Rect BTN_ARP_HOLD    = {446, ARP_BTN_Y, 46, ARP_BTN_H};
 
 const SDL_Rect BTN_FX_REV = { 62, FX_BTN_Y, 52, FX_BTN_H};
 const SDL_Rect BTN_FX_CHO = {150, FX_BTN_Y, 52, FX_BTN_H};
 const SDL_Rect BTN_FX_DLY = {238, FX_BTN_Y, 52, FX_BTN_H};
 
-const SDL_Rect BTN_LOOP_TOG  = { 10, LOOP_BTN_Y,  46, LOOP_BTN_H};
-const SDL_Rect BTN_LOOP_T[4] = {
-    { 64, LOOP_BTN_Y, 82, LOOP_BTN_H},
-    {150, LOOP_BTN_Y, 82, LOOP_BTN_H},
-    {236, LOOP_BTN_Y, 82, LOOP_BTN_H},
-    {322, LOOP_BTN_Y, 82, LOOP_BTN_H},
+// Loop row: [LOOP]  [T1][T2][T3][T4]  ····  [REC]
+const SDL_Rect BTN_LOOP_TOG    = { 12, LOOP_BTN_Y,  44, LOOP_BTN_H};
+const SDL_Rect BTN_LOOP_T[4]   = {
+    { 68, LOOP_BTN_Y, 80, LOOP_BTN_H},
+    {152, LOOP_BTN_Y, 80, LOOP_BTN_H},
+    {236, LOOP_BTN_Y, 80, LOOP_BTN_H},
+    {320, LOOP_BTN_Y, 80, LOOP_BTN_H},
 };
-const SDL_Rect BTN_LOOP_REC = {840, LOOP_BTN_Y, 54, LOOP_BTN_H};
+const SDL_Rect BTN_LOOP_REC    = {840, LOOP_BTN_Y,  52, LOOP_BTN_H};
 
-// ── Primitives ────────────────────────────────────────────────────────────────
+// ── Low-level draw helpers ────────────────────────────────────────────────────
 
 static void set_color(SDL_Renderer *r, SDL_Color c) {
     SDL_SetRenderDrawColor(r, c.r, c.g, c.b, c.a);
@@ -163,58 +71,44 @@ static void set_color(SDL_Renderer *r, SDL_Color c) {
 static void fill_rect(SDL_Renderer *r, int x, int y, int w, int h, SDL_Color c) {
     set_color(r, c); SDL_RenderFillRect(r, &(SDL_Rect){x,y,w,h});
 }
+static void draw_rect_outline(SDL_Renderer *r, int x, int y, int w, int h, SDL_Color c) {
+    set_color(r, c); SDL_RenderDrawRect(r, &(SDL_Rect){x,y,w,h});
+}
 static void hline(SDL_Renderer *r, int y, SDL_Color c) {
     set_color(r, c); SDL_RenderDrawLine(r, 0, y, WIN_W, y);
 }
-
-// Rounded fill — scanline approach
-static void fill_rr(SDL_Renderer *r, int x, int y, int w, int h, int rad, SDL_Color c) {
-    set_color(r, c);
-    if (rad <= 0 || 2*rad > w || 2*rad > h) {
-        SDL_RenderFillRect(r, &(SDL_Rect){x, y, w, h}); return;
-    }
-    for (int dy = 0; dy < h; dy++) {
-        int clip = 0;
-        if (dy < rad) {
-            double d = (double)(rad - 1 - dy);
-            clip = rad - (int)sqrt((double)rad*rad - d*d);
-        } else if (dy >= h - rad) {
-            double d = (double)(dy - (h - rad));
-            clip = rad - (int)sqrt((double)rad*rad - d*d);
-        }
-        SDL_RenderFillRect(r, &(SDL_Rect){x+clip, y+dy, w-2*clip, 1});
+static void draw_text(SDL_Renderer *r, int x, int y, float sc,
+                      const char *text, SDL_Color col) {
+    static char buf[1<<17];
+    int nq = stb_easy_font_print(0, 0, (char*)text, NULL, buf, (int)sizeof(buf));
+    set_color(r, col);
+    for (int q = 0; q < nq; q++) {
+        float *v = (float*)(buf + q*64);
+        float x0=v[0],y0=v[1],x1=v[0],y1=v[1];
+        for (int i=1;i<4;i++){float vx=v[i*4],vy=v[i*4+1];
+            if(vx<x0)x0=vx; if(vx>x1)x1=vx;
+            if(vy<y0)y0=vy; if(vy>y1)y1=vy;}
+        SDL_Rect rc={x+(int)(x0*sc),y+(int)(y0*sc),
+                     (int)((x1-x0+1)*sc),(int)((y1-y0+1)*sc)};
+        SDL_RenderFillRect(r, &rc);
     }
 }
 
-// Rounded outline — 1px
-static void draw_rr(SDL_Renderer *r, int x, int y, int w, int h, int rad, SDL_Color c) {
-    set_color(r, c);
-    if (rad <= 0) { SDL_RenderDrawRect(r, &(SDL_Rect){x,y,w,h}); return; }
-    SDL_RenderDrawLine(r, x+rad, y,     x+w-1-rad, y);
-    SDL_RenderDrawLine(r, x+rad, y+h-1, x+w-1-rad, y+h-1);
-    SDL_RenderDrawLine(r, x,     y+rad, x,          y+h-1-rad);
-    SDL_RenderDrawLine(r, x+w-1, y+rad, x+w-1,      y+h-1-rad);
-    for (int a = 0; a < rad; a++) {
-        double d = (double)(rad - 1 - a);
-        int off = rad - (int)sqrt((double)rad*rad - d*d);
-        SDL_RenderDrawPoint(r, x+off,     y+a);
-        SDL_RenderDrawPoint(r, x+w-1-off, y+a);
-        SDL_RenderDrawPoint(r, x+off,     y+h-1-a);
-        SDL_RenderDrawPoint(r, x+w-1-off, y+h-1-a);
-    }
+int text_width(const char *s, float sc) {
+    return (int)(stb_easy_font_width((char*)s) * sc);
 }
-
-// 2px rounded outline
-static void draw_rr2(SDL_Renderer *r, int x, int y, int w, int h, int rad, SDL_Color c) {
-    draw_rr(r, x,   y,   w,   h,   rad,         c);
-    draw_rr(r, x+1, y+1, w-2, h-2, rad>1?rad-1:0, c);
-}
-
-// ── Geometry ──────────────────────────────────────────────────────────────────
-
 int pt_in_rect(int px, int py, SDL_Rect re) {
-    return px>=re.x && px<re.x+re.w && py>=re.y && py<re.y+re.h;
+    return px >= re.x && px < re.x+re.w && py >= re.y && py < re.y+re.h;
 }
+
+static void draw_arrow_btn(SDL_Renderer *r, SDL_Rect btn, const char *lbl, int hov) {
+    fill_rect(r, btn.x, btn.y, btn.w, btn.h, hov ? C_SURF : C_BG);
+    draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, C_BORDER);
+    draw_text(r, btn.x+(btn.w-text_width(lbl,1.5f))/2,
+                 btn.y+(btn.h-(int)(13*1.5f))/2, 1.5f, lbl, hov ? C_HI : C_MID);
+}
+
+// ── Pad + dot geometry ────────────────────────────────────────────────────────
 
 static SDL_Rect pad_rect(int i) {
     if (i < 7)  return (SDL_Rect){PAD_X0 + i*(PAD_W+PAD_GAP), LOWER_PAD_Y, PAD_W, PAD_H};
@@ -230,7 +124,10 @@ int hit_pad(int mx, int my) {
     return -1;
 }
 int hit_dot(int mx, int my) {
-    for (int v = 0; v <= KNOB_MAX; v++) { SDL_Rect d = dot_rect(v); if (pt_in_rect(mx,my,d)) return v; }
+    for (int v = 0; v <= KNOB_MAX; v++) {
+        SDL_Rect d = dot_rect(v);
+        if (pt_in_rect(mx, my, d)) return v;
+    }
     return -1;
 }
 int hit_row_mode_btn(int mx, int my) {
@@ -241,96 +138,67 @@ int hit_row_mode_btn(int mx, int my) {
     return -1;
 }
 
-// ── Chip — the standard small button ─────────────────────────────────────────
-
-static void chip(SDL_Renderer *r, SDL_Rect b, const char *lbl, int active, int hov) {
-    SDL_Color fill, bord, tc;
-    if (active) {
-        fill = C_ACCENT; bord = C_ACCENT;
-        tc = (SDL_Color){252,246,232,255};
-    } else if (hov) {
-        fill = C_SURF; bord = C_MID; tc = C_HI;
-    } else {
-        fill = C_BG; bord = C_BORDER; tc = C_MID;
-    }
-    fill_rr(r, b.x, b.y, b.w, b.h, 5, fill);
-    if (active) draw_rr2(r, b.x, b.y, b.w, b.h, 5, bord);
-    else        draw_rr(r,  b.x, b.y, b.w, b.h, 5, bord);
-    txt_c(r, b.x+b.w/2, b.y+b.h/2, font_md, lbl, tc);
-}
-
-static void arrow_btn(SDL_Renderer *r, SDL_Rect b, const char *lbl, int hov) {
-    fill_rr(r, b.x, b.y, b.w, b.h, 5, hov ? C_SURF : C_BG);
-    draw_rr(r, b.x, b.y, b.w, b.h, 5, hov ? C_MID : C_BORDER);
-    txt_c(r, b.x+b.w/2, b.y+b.h/2, font_md, lbl, hov ? C_HI : C_MID);
-}
-
-// ── Sections ──────────────────────────────────────────────────────────────────
+// ── Render sections ───────────────────────────────────────────────────────────
 
 static void render_voice_dots(SDL_Renderer *r) {
-    txt(r, 12, DOTS_Y + (DOT_SZ - sh(font_sm))/2, font_sm, "VOICE", C_DIM);
+    draw_text(r, 14, DOTS_Y, 1.3f, "VOICE", C_DIM);
     for (int v = 0; v <= KNOB_MAX; v++) {
         SDL_Rect d = dot_rect(v);
-        if (v <= voice_level) {
-            fill_rr(r, d.x, d.y, d.w, d.h, d.w/2, C_ACCENT);
-        } else {
-            fill_rr(r, d.x, d.y, d.w, d.h, d.w/2, C_SURF);
-            draw_rr(r, d.x, d.y, d.w, d.h, d.w/2, C_BORDER);
-        }
+        SDL_Color fill = (v <= voice_level) ? C_WHITE : (SDL_Color){28,28,28,255};
+        SDL_Color bord = (v == voice_level) ? C_HI    : C_BORDER;
+        fill_rect(r, d.x, d.y, d.w, d.h, fill);
+        draw_rect_outline(r, d.x, d.y, d.w, d.h, bord);
     }
-    txt(r, DOTS_X+5*(DOT_SZ+DOT_GAP)+4, DOTS_Y+(DOT_SZ-sh(font_sm))/2,
-        font_sm, VOICE_LABELS[voice_level], C_MID);
+    draw_text(r, DOTS_X+5*(DOT_SZ+DOT_GAP)+4, DOTS_Y, 1.3f, VOICE_LABELS[voice_level], C_MID);
 }
 
 static void render_topbar(SDL_Renderer *r) {
     fill_rect(r, 0, 0, WIN_W, TOP_H, C_BG);
-    fill_rect(r, 0, 0, WIN_W, 3, C_ACCENT);   // identity stripe
     hline(r, TOP_H, C_SEP);
-
-    arrow_btn(r, BTN_KEY_PREV, "<", pt_in_rect(mouse_x, mouse_y, BTN_KEY_PREV));
-    arrow_btn(r, BTN_KEY_NEXT, ">", pt_in_rect(mouse_x, mouse_y, BTN_KEY_NEXT));
-
-    char key_lbl[24]; snprintf(key_lbl, sizeof(key_lbl), "%s MAJOR", KEY_NAMES[current_key]);
-    int klw = sw(font_xl, key_lbl);
-    int klx = BTN_KEY_PREV.x+BTN_KEY_PREV.w
-            + (BTN_KEY_NEXT.x-BTN_KEY_PREV.x-BTN_KEY_PREV.w-klw)/2;
-    txt(r, klx, TOP_H/2-sh(font_xl)/2+1, font_xl, key_lbl, C_HI);
-
-    arrow_btn(r, BTN_PATCH_PREV, "<", pt_in_rect(mouse_x, mouse_y, BTN_PATCH_PREV));
-    arrow_btn(r, BTN_PATCH_NEXT, ">", pt_in_rect(mouse_x, mouse_y, BTN_PATCH_NEXT));
-    txt(r, BTN_PATCH_PREV.x-46, TOP_H/2-sh(font_sm)/2, font_sm, "PATCH", C_DIM);
-    char ptch[8]; snprintf(ptch, sizeof(ptch), "#%03d", current_patch);
-    int plw = sw(font_md, ptch);
-    int plx = BTN_PATCH_PREV.x+BTN_PATCH_PREV.w
-            + (BTN_PATCH_NEXT.x-BTN_PATCH_PREV.x-BTN_PATCH_PREV.w-plw)/2;
-    txt(r, plx, TOP_H/2-sh(font_md)/2+1, font_md, ptch, C_MID);
+    int kp = pt_in_rect(mouse_x, mouse_y, BTN_KEY_PREV);
+    int kn = pt_in_rect(mouse_x, mouse_y, BTN_KEY_NEXT);
+    draw_arrow_btn(r, BTN_KEY_PREV, "<", kp);
+    draw_arrow_btn(r, BTN_KEY_NEXT, ">", kn);
+    char key_lbl[20]; snprintf(key_lbl, sizeof(key_lbl), "%s MAJOR", KEY_NAMES[current_key]);
+    float ksc = 2.2f; int klw = text_width(key_lbl, ksc);
+    int klx = BTN_KEY_PREV.x+BTN_KEY_PREV.w+(BTN_KEY_NEXT.x-BTN_KEY_PREV.x-BTN_KEY_PREV.w-klw)/2;
+    draw_text(r, klx, TOP_H/2-(int)(13*ksc)/2+1, ksc, key_lbl, C_WHITE);
+    int pp = pt_in_rect(mouse_x, mouse_y, BTN_PATCH_PREV);
+    int pn = pt_in_rect(mouse_x, mouse_y, BTN_PATCH_NEXT);
+    draw_arrow_btn(r, BTN_PATCH_PREV, "<", pp);
+    draw_arrow_btn(r, BTN_PATCH_NEXT, ">", pn);
+    char ptch[16]; snprintf(ptch, sizeof(ptch), "#%03d", current_patch);
+    draw_text(r, BTN_PATCH_PREV.x-58, TOP_H/2-(int)(13*1.3f)/2+1, 1.3f, "PATCH", C_DIM);
+    float psc = 1.8f; int plw = text_width(ptch, psc);
+    int plx = BTN_PATCH_PREV.x+BTN_PATCH_PREV.w+(BTN_PATCH_NEXT.x-BTN_PATCH_PREV.x-BTN_PATCH_PREV.w-plw)/2;
+    draw_text(r, plx, TOP_H/2-(int)(13*psc)/2+1, psc, ptch, C_MID);
 }
 
 static void render_controls(SDL_Renderer *r) {
     fill_rect(r, 0, CTRL_Y, WIN_W, CTRL_H, C_BG);
     hline(r, CTRL_Y+CTRL_H, C_SEP);
     render_voice_dots(r);
-
-    chip(r, BTN_BASS, "BASS", bass_on, pt_in_rect(mouse_x, mouse_y, BTN_BASS));
-
-    txt(r, BTN_OCT_DOWN.x, BTN_OCT_DOWN.y-13, font_sm, "OCT", C_DIM);
-    arrow_btn(r, BTN_OCT_DOWN, "-", pt_in_rect(mouse_x, mouse_y, BTN_OCT_DOWN));
-    arrow_btn(r, BTN_OCT_UP,   "+", pt_in_rect(mouse_x, mouse_y, BTN_OCT_UP));
+    SDL_Rect bb = BTN_BASS; int bh = pt_in_rect(mouse_x, mouse_y, bb);
+    SDL_Color bf = bass_on ? C_ACCENT : (bh ? C_SURF : C_BG);
+    fill_rect(r, bb.x, bb.y, bb.w, bb.h, bf);
+    draw_rect_outline(r, bb.x, bb.y, bb.w, bb.h, bass_on ? C_ACCENT : C_BORDER);
+    draw_text(r, bb.x+(bb.w-text_width("BASS",1.5f))/2,
+                 bb.y+(bb.h-(int)(13*1.5f))/2, 1.5f, "BASS", bass_on ? C_WHITE : C_MID);
+    draw_text(r, BTN_OCT_DOWN.x, BTN_OCT_DOWN.y-12, 1.2f, "OCT", C_DIM);
+    draw_arrow_btn(r, BTN_OCT_DOWN, "-", pt_in_rect(mouse_x, mouse_y, BTN_OCT_DOWN));
+    draw_arrow_btn(r, BTN_OCT_UP,   "+", pt_in_rect(mouse_x, mouse_y, BTN_OCT_UP));
     char oct_str[8]; snprintf(oct_str, sizeof(oct_str), "%+d", octave_shift);
-    int otw = sw(font_md, oct_str);
-    int ocx = BTN_OCT_DOWN.x+BTN_OCT_DOWN.w
-            + (BTN_OCT_UP.x-BTN_OCT_DOWN.x-BTN_OCT_DOWN.w-otw)/2;
-    txt(r, ocx, CTRL_Y+(CTRL_H-sh(font_md))/2, font_md, oct_str,
-        octave_shift ? C_HI : C_MID);
-
+    int otw = text_width(oct_str, 1.8f);
+    int ocx = BTN_OCT_DOWN.x+BTN_OCT_DOWN.w+(BTN_OCT_UP.x-BTN_OCT_DOWN.x-BTN_OCT_DOWN.w-otw)/2;
+    draw_text(r, ocx, CTRL_Y+(CTRL_H-(int)(13*1.8f))/2, 1.8f, oct_str,
+              octave_shift ? C_HI : C_MID);
     for (int i = 0; i < NUM_CK; i++) {
         if (!actv[i].active) continue;
         char cname[24];
         make_chord_name(current_key, CK[i].degree, voice_level, quality_override,
                         cname, sizeof(cname));
         SDL_Color cc = quality_override >= 0 ? OVR_COL[quality_override] : C_ACCENT;
-        int cw = sw(font_xl, cname);
-        txt(r, 528+(360-cw)/2, CTRL_Y+(CTRL_H-sh(font_xl))/2, font_xl, cname, cc);
+        draw_text(r, 530, CTRL_Y+(CTRL_H-(int)(13*2.8f))/2, 2.8f, cname, cc);
         break;
     }
 }
@@ -340,144 +208,124 @@ static void render_modifier_strip(SDL_Renderer *r) {
     hline(r, MOD_Y+MOD_H, C_SEP);
     for (int i = 0; i < 7; i++) {
         SDL_Rect btn = {MOD_BTN_X0+i*(MOD_BTN_W+MOD_BTN_GAP), MOD_BTN_Y, MOD_BTN_W, MOD_BTN_H};
-        int hov = pt_in_rect(mouse_x, mouse_y, btn);
-        int act = (quality_override == i);
-        fill_rr(r, btn.x, btn.y, btn.w, btn.h, 5,
-                act ? OVR_COL[i] : (hov ? C_SURF : C_BG));
-        if (act) draw_rr2(r, btn.x, btn.y, btn.w, btn.h, 5, OVR_COL[i]);
-        else     draw_rr(r,  btn.x, btn.y, btn.w, btn.h, 5, hov ? C_BORDER : C_SEP);
-        SDL_Color tc = act ? (SDL_Color){252,246,232,255} : (hov ? C_HI : C_DIM);
-        txt_c(r, btn.x+btn.w/2, btn.y+btn.h/2, font_sm, OVR_LABELS[i], tc);
+        int hov = pt_in_rect(mouse_x, mouse_y, btn), act = (quality_override == i);
+        fill_rect(r, btn.x, btn.y, btn.w, btn.h,
+                  act ? OVR_COL[i] : (hov ? C_SURF : C_BG));
+        draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h,
+                          act ? OVR_COL[i] : (hov ? C_BORDER : C_DIM));
+        draw_text(r, btn.x+(btn.w-text_width(OVR_LABELS[i],1.3f))/2,
+                     btn.y+(btn.h-(int)(13*1.3f))/2, 1.3f, OVR_LABELS[i],
+                     act ? C_WHITE : (hov ? C_MID : C_DIM));
     }
 }
 
 static void render_arp_row(SDL_Renderer *r) {
     fill_rect(r, 0, ARP_Y, WIN_W, ARP_H, C_BG);
     hline(r, ARP_Y+ARP_H, C_SEP);
-    int cy = ARP_BTN_Y + ARP_BTN_H/2;
+    int ty = ARP_BTN_Y + (ARP_BTN_H-(int)(13*1.3f))/2;
 
-    chip(r, BTN_ARP_TOG, "ARP", arp_on, pt_in_rect(mouse_x, mouse_y, BTN_ARP_TOG));
+    { SDL_Rect btn = BTN_ARP_TOG;
+      SDL_Color fill = arp_on ? C_ACCENT : (pt_in_rect(mouse_x,mouse_y,btn) ? C_SURF : C_BG);
+      fill_rect(r, btn.x, btn.y, btn.w, btn.h, fill);
+      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, arp_on ? C_ACCENT : C_BORDER);
+      draw_text(r, btn.x+(btn.w-text_width("ARP",1.3f))/2, ty, 1.3f, "ARP",
+                arp_on ? C_WHITE : C_MID); }
 
-    if (!arp_on) {
-        txt(r, 62, cy-sh(font_sm)/2, font_sm, "ARPEGGIATE OFF", C_DIM); return;
-    }
+    if (!arp_on) { draw_text(r, 62, ty, 1.2f, "ARPEGGIATE OFF", C_DIM); return; }
 
-    txt(r, 62,  cy-sh(font_sm)/2, font_sm, "DIV", C_DIM);
-    chip(r, BTN_ARP_DIV, ARP_DIV_LBL[arp_div_idx], 0, pt_in_rect(mouse_x,mouse_y,BTN_ARP_DIV));
+    draw_text(r, 62, ty, 1.2f, "DIV", C_DIM);
+    { SDL_Rect btn = BTN_ARP_DIV; int hov = pt_in_rect(mouse_x, mouse_y, btn);
+      fill_rect(r, btn.x, btn.y, btn.w, btn.h, hov ? C_SURF : C_BG);
+      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, C_BORDER);
+      draw_text(r, btn.x+(btn.w-text_width(ARP_DIV_LBL[arp_div_idx],1.3f))/2,
+                ty, 1.3f, ARP_DIV_LBL[arp_div_idx], C_HI); }
 
-    txt(r, 136, cy-sh(font_sm)/2, font_sm, "BPM", C_DIM);
-    arrow_btn(r, BTN_BPM_DOWN, "<", pt_in_rect(mouse_x, mouse_y, BTN_BPM_DOWN));
-    arrow_btn(r, BTN_BPM_UP,   ">", pt_in_rect(mouse_x, mouse_y, BTN_BPM_UP));
+    draw_text(r, 136, ty, 1.2f, "BPM", C_DIM);
+    draw_arrow_btn(r, BTN_BPM_DOWN, "<", pt_in_rect(mouse_x, mouse_y, BTN_BPM_DOWN));
+    draw_arrow_btn(r, BTN_BPM_UP,   ">", pt_in_rect(mouse_x, mouse_y, BTN_BPM_UP));
     { char s[8]; snprintf(s, sizeof(s), "%d", arp_bpm);
-      int bx = BTN_BPM_DOWN.x+BTN_BPM_DOWN.w
-             + (BTN_BPM_UP.x-BTN_BPM_DOWN.x-BTN_BPM_DOWN.w-sw(font_md,s))/2;
-      txt(r, bx, cy-sh(font_md)/2, font_md, s, C_HI); }
+      int tw = text_width(s, 1.5f);
+      int cx = BTN_BPM_DOWN.x+BTN_BPM_DOWN.w+(BTN_BPM_UP.x-BTN_BPM_DOWN.x-BTN_BPM_DOWN.w-tw)/2;
+      draw_text(r, cx, ty, 1.5f, s, C_WHITE); }
 
-    chip(r, BTN_ARP_ORD, ARP_ORD_LBL[(int)arp_order], 0, pt_in_rect(mouse_x,mouse_y,BTN_ARP_ORD));
+    { SDL_Rect btn = BTN_ARP_ORD; int hov = pt_in_rect(mouse_x, mouse_y, btn);
+      fill_rect(r, btn.x, btn.y, btn.w, btn.h, hov ? C_SURF : C_BG);
+      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, C_BORDER);
+      draw_text(r, btn.x+(btn.w-text_width(ARP_ORD_LBL[(int)arp_order],1.3f))/2,
+                ty, 1.3f, ARP_ORD_LBL[(int)arp_order], C_HI); }
 
-    txt(r, 298, cy-sh(font_sm)/2, font_sm, "OCT", C_DIM);
-    arrow_btn(r, BTN_ARPOCT_DOWN, "<", pt_in_rect(mouse_x, mouse_y, BTN_ARPOCT_DOWN));
-    arrow_btn(r, BTN_ARPOCT_UP,   ">", pt_in_rect(mouse_x, mouse_y, BTN_ARPOCT_UP));
+    draw_text(r, 298, ty, 1.2f, "OCT", C_DIM);
+    draw_arrow_btn(r, BTN_ARPOCT_DOWN, "<", pt_in_rect(mouse_x, mouse_y, BTN_ARPOCT_DOWN));
+    draw_arrow_btn(r, BTN_ARPOCT_UP,   ">", pt_in_rect(mouse_x, mouse_y, BTN_ARPOCT_UP));
     { char s[4]; snprintf(s, sizeof(s), "%d", arp_octaves);
-      int bx = BTN_ARPOCT_DOWN.x+BTN_ARPOCT_DOWN.w
-             + (BTN_ARPOCT_UP.x-BTN_ARPOCT_DOWN.x-BTN_ARPOCT_DOWN.w-sw(font_md,s))/2;
-      txt(r, bx, cy-sh(font_md)/2, font_md, s, C_HI); }
+      int tw = text_width(s, 1.5f);
+      int cx = BTN_ARPOCT_DOWN.x+BTN_ARPOCT_DOWN.w+(BTN_ARPOCT_UP.x-BTN_ARPOCT_DOWN.x-BTN_ARPOCT_DOWN.w-tw)/2;
+      draw_text(r, cx, ty, 1.5f, s, C_WHITE); }
 
-    chip(r, BTN_ARP_GATE, ARP_GATE_LBL[arp_gate], 0, pt_in_rect(mouse_x,mouse_y,BTN_ARP_GATE));
-    chip(r, BTN_ARP_HOLD, "HOLD", arp_hold, pt_in_rect(mouse_x,mouse_y,BTN_ARP_HOLD));
+    { SDL_Rect btn = BTN_ARP_GATE; int hov = pt_in_rect(mouse_x, mouse_y, btn);
+      fill_rect(r, btn.x, btn.y, btn.w, btn.h, hov ? C_SURF : C_BG);
+      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, C_BORDER);
+      draw_text(r, btn.x+(btn.w-text_width(ARP_GATE_LBL[arp_gate],1.3f))/2,
+                ty, 1.3f, ARP_GATE_LBL[arp_gate], C_HI); }
+
+    { SDL_Rect btn = BTN_ARP_HOLD;
+      SDL_Color fill = arp_hold ? C_WHITE : (pt_in_rect(mouse_x,mouse_y,btn) ? C_SURF : C_BG);
+      fill_rect(r, btn.x, btn.y, btn.w, btn.h, fill);
+      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, arp_hold ? C_WHITE : C_BORDER);
+      draw_text(r, btn.x+(btn.w-text_width("HOLD",1.3f))/2, ty, 1.3f, "HOLD",
+                arp_hold ? C_BLACK : C_MID); }
+}
+
+static void render_fx_cycle_btn(SDL_Renderer *r, SDL_Rect btn,
+                                 const char *const *labels, int preset) {
+    int hov = pt_in_rect(mouse_x, mouse_y, btn);
+    int act = preset > 0;
+    fill_rect(r, btn.x, btn.y, btn.w, btn.h,
+              act ? C_WHITE : (hov ? C_SURF : C_BG));
+    draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, act ? C_WHITE : C_BORDER);
+    draw_text(r, btn.x+(btn.w-text_width(labels[preset],1.3f))/2,
+                 btn.y+(btn.h-(int)(13*1.3f))/2,
+              1.3f, labels[preset], act ? C_BLACK : (hov ? C_HI : C_MID));
 }
 
 static void render_fx_row(SDL_Renderer *r) {
     fill_rect(r, 0, FX_Y, WIN_W, FX_H, C_BG);
     hline(r, FX_Y+FX_H, C_SEP);
-    int cy = FX_BTN_Y + FX_BTN_H/2;
-    txt(r, 12,  cy-sh(font_sm)/2, font_sm, "FX",  C_DIM);
-    txt(r, 38,  cy-sh(font_sm)/2, font_sm, "REV", C_DIM);
-    chip(r, BTN_FX_REV, REV_LABELS[rev_preset], rev_preset>0, pt_in_rect(mouse_x,mouse_y,BTN_FX_REV));
-    txt(r, 126, cy-sh(font_sm)/2, font_sm, "CHO", C_DIM);
-    chip(r, BTN_FX_CHO, CHO_LABELS[cho_preset], cho_preset>0, pt_in_rect(mouse_x,mouse_y,BTN_FX_CHO));
-    txt(r, 214, cy-sh(font_sm)/2, font_sm, "DLY", C_DIM);
-    chip(r, BTN_FX_DLY, DLY_LABELS[dly_preset], dly_preset>0, pt_in_rect(mouse_x,mouse_y,BTN_FX_DLY));
+    int ty = FX_BTN_Y + (FX_BTN_H-(int)(13*1.2f))/2;
+    draw_text(r, 14,  ty, 1.2f, "FX",  C_DIM);
+    draw_text(r, 40,  ty, 1.2f, "REV", C_DIM);
+    render_fx_cycle_btn(r, BTN_FX_REV, REV_LABELS, rev_preset);
+    draw_text(r, 128, ty, 1.2f, "CHO", C_DIM);
+    render_fx_cycle_btn(r, BTN_FX_CHO, CHO_LABELS, cho_preset);
+    draw_text(r, 216, ty, 1.2f, "DLY", C_DIM);
+    render_fx_cycle_btn(r, BTN_FX_DLY, DLY_LABELS, dly_preset);
     if (dly_preset > 0) {
-        char hint[16];
-        float ms = (dly_preset==1)?60000.f/arp_bpm*.5f
-                 : (dly_preset==2)?60000.f/arp_bpm
-                                  :60000.f/arp_bpm*1.5f;
+        char hint[24];
+        float ms = (dly_preset == 1) ? 60000.0f/arp_bpm*0.5f
+                 : (dly_preset == 2) ? 60000.0f/arp_bpm
+                                     : 60000.0f/arp_bpm*1.5f;
         snprintf(hint, sizeof(hint), "%.0fms", ms);
-        txt(r, 298, cy-sh(font_sm)/2, font_sm, hint, C_DIM);
+        draw_text(r, 298, ty, 1.2f, hint, C_DIM);
     }
-}
-
-static void render_loop_row(SDL_Renderer *r) {
-    fill_rect(r, 0, LOOP_Y, WIN_W, LOOP_H, C_BG);
-    hline(r, LOOP_Y+LOOP_H, C_SEP);
-    int cy = LOOP_BTN_Y + LOOP_BTN_H/2;
-    LoopState s = looper.state;
-    int loop_active = (s != LOOP_IDLE);
-
-    chip(r, BTN_LOOP_TOG, "LOOP", loop_active, pt_in_rect(mouse_x,mouse_y,BTN_LOOP_TOG));
-
-    static const char *TN[4] = {"T1 BASS","T2 CHORD","T3 LEAD","T4 DRUM"};
-    for (int i = 0; i < NUM_LOOP_TRACKS; i++) {
-        SDL_Rect b = BTN_LOOP_T[i];
-        int is_active_track = (i == looper.active_track);
-        int is_rec = is_active_track && (s==LOOP_RECORDING||s==LOOP_OVERDUB);
-        int has = (looper.tracks[i].count > 0);
-
-        SDL_Color fill = is_rec ? C_ACCENT : (has ? C_SURF : C_BG);
-        SDL_Color bord = is_active_track ? C_ACCENT : (has ? C_BORDER : C_SEP);
-        SDL_Color tc   = is_rec ? (SDL_Color){252,246,232,255}
-                       : (has  ? C_HI : C_DIM);
-
-        fill_rr(r, b.x, b.y, b.w, b.h, 5, fill);
-        if (is_active_track) draw_rr2(r, b.x, b.y, b.w, b.h, 5, bord);
-        else                 draw_rr(r,  b.x, b.y, b.w, b.h, 5, bord);
-        txt_c(r, b.x+b.w/2, cy, font_sm, TN[i], tc);
-    }
-
-    if (s == LOOP_ARMED) {
-        char s_buf[4]; snprintf(s_buf, sizeof(s_buf), "%d", loop_beat_countdown());
-        SDL_Color cc = ((SDL_GetTicks()/220)%2==0) ? C_ACCENT : C_MID;
-        txt_c(r, 430, cy, font_lg, s_buf, cc);
-        txt(r, 445, cy-sh(font_sm)/2, font_sm, "bars", C_DIM);
-    } else if (s==LOOP_PLAYING || s==LOOP_OVERDUB) {
-        float pos = loop_position();
-        int bw=380, bx=420, by=LOOP_BTN_Y+(LOOP_BTN_H-6)/2;
-        fill_rr(r, bx, by, bw, 6, 3, C_SURF);
-        draw_rr(r, bx, by, bw, 6, 3, C_BORDER);
-        if (pos > 0.001f)
-            fill_rr(r, bx, by, (int)(pos*bw), 6, 3,
-                    s==LOOP_OVERDUB ? C_ACCENT : C_HI);
-    }
-
-    // REC button
-    { SDL_Rect b = BTN_LOOP_REC;
-      int rec_lit = (s==LOOP_RECORDING||s==LOOP_OVERDUB||s==LOOP_ARMED);
-      int pulse   = rec_lit && ((SDL_GetTicks()/320)%2==0);
-      fill_rr(r, b.x, b.y, b.w, b.h, 5, pulse ? C_ACCENT : C_BG);
-      if (rec_lit) draw_rr2(r, b.x, b.y, b.w, b.h, 5, C_ACCENT);
-      else         draw_rr(r,  b.x, b.y, b.w, b.h, 5,
-                           pt_in_rect(mouse_x,mouse_y,b) ? C_MID : C_BORDER);
-      SDL_Color rtc = rec_lit ? (pulse?(SDL_Color){252,246,232,255}:C_ACCENT) : C_MID;
-      txt_c(r, b.x+b.w/2, cy, font_md, "REC", rtc); }
 }
 
 static void render_mode_badge(SDL_Renderer *r, int row_y, RowMode mode) {
-    SDL_Rect b = {MODE_BTN_X, row_y-1, MODE_BTN_W, MODE_BTN_H};
-    int hov = pt_in_rect(mouse_x, mouse_y, b);
-    fill_rr(r, b.x, b.y, b.w, b.h, 3,
-            mode==ROW_CHORD ? C_BG : MODE_COL[(int)mode]);
-    draw_rr(r, b.x, b.y, b.w, b.h, 3,
-            mode==ROW_CHORD ? C_BORDER : MODE_COL[(int)mode]);
-    txt_c(r, b.x+b.w/2, b.y+b.h/2, font_sm, row_mode_name(mode),
-          hov ? C_HI : MODE_TEXT_COL[(int)mode]);
+    SDL_Rect btn = {MODE_BTN_X, row_y-1, MODE_BTN_W, MODE_BTN_H};
+    int hov = pt_in_rect(mouse_x, mouse_y, btn);
+    fill_rect(r, btn.x, btn.y, btn.w, btn.h, hov ? C_SURF : (SDL_Color){22,22,22,255});
+    draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h,
+                      mode == ROW_CHORD ? C_BORDER : MODE_COL[(int)mode]);
+    SDL_Color tc = hov ? C_HI : MODE_TEXT_COL[(int)mode];
+    const char *lbl = row_mode_name(mode);
+    draw_text(r, btn.x+(btn.w-text_width(lbl,1.2f))/2,
+                 btn.y+(btn.h-(int)(13*1.2f))/2+1, 1.2f, lbl, tc);
 }
 
 static void render_pads(SDL_Renderer *r) {
-    txt(r, PAD_X0, UPPER_LABEL_Y, font_sm, "C4  Q W E R T Y U", C_DIM);
+    draw_text(r, PAD_X0, UPPER_LABEL_Y, 1.2f, "C4   Q W E R T Y U", C_DIM);
     render_mode_badge(r, UPPER_LABEL_Y, upper_mode);
-    txt(r, PAD_X0, LOWER_LABEL_Y, font_sm, "C3  A S D F G H J", C_DIM);
-    txt(r, K_PAD_X, LOWER_LABEL_Y, font_sm, "C5 K", C_DIM);
+    draw_text(r, PAD_X0, LOWER_LABEL_Y, 1.2f, "C3   A S D F G H J", C_DIM);
+    draw_text(r, K_PAD_X, LOWER_LABEL_Y, 1.2f, "C5 K", C_DIM);
     render_mode_badge(r, LOWER_LABEL_Y, lower_mode);
 
     for (int i = 0; i < NUM_CK; i++) {
@@ -487,26 +335,21 @@ static void render_pads(SDL_Renderer *r) {
 
         SDL_Color fill, bord, text_col, sub_col;
         if (held && quality_override >= 0 && mode == ROW_CHORD) {
-            fill = OVR_COL[quality_override];
-            bord = OVR_COL[quality_override];
-            text_col = (SDL_Color){252,246,232,255};
-            sub_col  = (SDL_Color){252,246,232,180};
+            SDL_Color oc = OVR_COL[quality_override];
+            fill = oc; bord = C_WHITE; text_col = C_WHITE;
+            sub_col = (SDL_Color){oc.r/2+127, oc.g/2+127, oc.b/2+127, 255};
         } else if (held) {
-            fill = C_ACCENT; bord = C_ACCENT;
-            text_col = (SDL_Color){252,246,232,255};
-            sub_col  = (SDL_Color){252,246,232,160};
+            fill = C_WHITE; bord = C_WHITE; text_col = C_BLACK;
+            sub_col = (SDL_Color){80,80,80,255};
         } else if (hov) {
-            fill = C_SURF; bord = C_MID;
-            text_col = C_HI; sub_col = C_DIM;
+            fill = C_SURF; bord = C_BORDER; text_col = C_HI; sub_col = C_DIM;
         } else {
-            fill = C_SURF;
-            bord = (mode==ROW_CHORD) ? C_BORDER : MODE_COL[(int)mode];
+            fill = C_BG;
+            bord = (mode == ROW_CHORD) ? C_BORDER : MODE_COL[(int)mode];
             text_col = C_MID; sub_col = C_DIM;
         }
-
-        fill_rr(r, pad.x, pad.y, pad.w, pad.h, 7, fill);
-        if (held) draw_rr2(r, pad.x, pad.y, pad.w, pad.h, 7, bord);
-        else      draw_rr(r,  pad.x, pad.y, pad.w, pad.h, 7, bord);
+        fill_rect(r, pad.x, pad.y, pad.w, pad.h, fill);
+        draw_rect_outline(r, pad.x, pad.y, pad.w, pad.h, bord);
 
         char cname[24];
         if (mode == ROW_CHORD)
@@ -514,29 +357,113 @@ static void render_pads(SDL_Renderer *r) {
                             cname, sizeof(cname));
         else
             snprintf(cname, sizeof(cname), "%s",
-                     KEY_NAMES[(current_key+MAJOR_SCALE[CK[i].degree])%12]);
-
-        int cx = pad.x + pad.w/2;
-        int cy = pad.y + pad.h/2 - 2;
-        txt_c(r, cx, cy, font_lg, cname, text_col);
+                     KEY_NAMES[(current_key + MAJOR_SCALE[CK[i].degree]) % 12]);
+        float csc = ((int)strlen(cname) > 5) ? 1.6f : 2.0f;
+        draw_text(r, pad.x+(pad.w-text_width(cname,csc))/2,
+                     pad.y+(pad.h-(int)(13*csc))/2-6, csc, cname, text_col);
 
         if (mode != ROW_CHORD) {
-            txt(r, pad.x+6, pad.y+6, font_sm,
-                mode==ROW_BASS?"BAS":"LED",
-                held?(SDL_Color){252,246,232,140}:MODE_TEXT_COL[(int)mode]);
+            SDL_Color mc = held ? (SDL_Color){100,100,100,255} : MODE_TEXT_COL[(int)mode];
+            draw_text(r, pad.x+4, pad.y+4, 1.1f, mode == ROW_BASS ? "BAS" : "LED", mc);
         }
-        if (held && arp_on)
-            txt(r, pad.x+6, pad.y+pad.h-20, font_sm, "ARP", sub_col);
-
-        txt(r, pad.x+6,                                pad.y+pad.h-17, font_sm, DEGREE_ROMAN[CK[i].degree], sub_col);
-        txt(r, pad.x+pad.w-sw(font_sm,CK[i].label)-6, pad.y+pad.h-17, font_sm, CK[i].label, sub_col);
+        if (held && arp_on) {
+            SDL_Color ac = text_col.r < 100 ? (SDL_Color){200,200,200,255}
+                                             : (SDL_Color){80,80,80,255};
+            draw_text(r, pad.x+4, pad.y+pad.h-28, 1.1f, "ARP", ac);
+        }
+        draw_text(r, pad.x+5, pad.y+pad.h-16, 1.2f, DEGREE_ROMAN[CK[i].degree], sub_col);
+        draw_text(r, pad.x+pad.w-text_width(CK[i].label,1.2f)-5,
+                     pad.y+pad.h-16, 1.2f, CK[i].label, sub_col);
     }
 }
 
-// ── Public ────────────────────────────────────────────────────────────────────
+// ── Loop row ──────────────────────────────────────────────────────────────────
+
+// Track state colour: empty=dim border, has content=mid, playing=white, rec=accent
+static SDL_Color loop_track_color(int ti) {
+    LoopState s = looper.state;
+    int is_active = (ti == looper.active_track);
+    int has_content = (looper.tracks[ti].count > 0);
+    if (is_active && (s == LOOP_RECORDING || s == LOOP_OVERDUB))
+        return C_ACCENT;
+    if (has_content && !looper.tracks[ti].muted)
+        return C_WHITE;
+    if (has_content && looper.tracks[ti].muted)
+        return C_DIM;
+    return (SDL_Color){28,28,28,255};
+}
+
+static void render_loop_row(SDL_Renderer *r) {
+    fill_rect(r, 0, LOOP_Y, WIN_W, LOOP_H, C_BG);
+    hline(r, LOOP_Y + LOOP_H, C_SEP);
+
+    int ty = LOOP_BTN_Y + (LOOP_BTN_H - (int)(13*1.3f)) / 2;
+    LoopState s = looper.state;
+    int loop_active = (s != LOOP_IDLE);
+
+    // [LOOP] toggle
+    { SDL_Rect btn = BTN_LOOP_TOG;
+      SDL_Color fill = loop_active ? C_ACCENT : (pt_in_rect(mouse_x,mouse_y,btn) ? C_SURF : C_BG);
+      SDL_Color bord = loop_active ? C_ACCENT : C_BORDER;
+      fill_rect(r, btn.x, btn.y, btn.w, btn.h, fill);
+      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, bord);
+      draw_text(r, btn.x+(btn.w-text_width("LOOP",1.3f))/2, ty, 1.3f, "LOOP",
+                loop_active ? C_WHITE : C_MID); }
+
+    // Track buttons
+    static const char *TRACK_NAMES[4] = {"T1 BASS","T2 CHORD","T3 LEAD","T4 DRUM"};
+    for (int i = 0; i < NUM_LOOP_TRACKS; i++) {
+        SDL_Rect btn = BTN_LOOP_T[i];
+        int is_active = (i == looper.active_track);
+        int hov = pt_in_rect(mouse_x, mouse_y, btn);
+        SDL_Color tc = loop_track_color(i);
+        SDL_Color fill = (tc.r == C_ACCENT.r && tc.g == C_ACCENT.g) ? C_ACCENT
+                       : (looper.tracks[i].count > 0 && !looper.tracks[i].muted) ? (SDL_Color){30,30,30,255}
+                       : (hov ? C_SURF : C_BG);
+        SDL_Color bord = is_active ? C_HI : (looper.tracks[i].count > 0 ? C_MID : C_DIM);
+        fill_rect(r, btn.x, btn.y, btn.w, btn.h, fill);
+        draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, bord);
+        draw_text(r, btn.x+(btn.w-text_width(TRACK_NAMES[i],1.2f))/2, ty, 1.2f,
+                  TRACK_NAMES[i], tc.r==0&&tc.g==0&&tc.b==0 ? C_DIM : tc);
+    }
+
+    // Position bar (when playing) or beat countdown (when armed)
+    if (s == LOOP_ARMED) {
+        int beats = loop_beat_countdown();
+        char s_buf[8]; snprintf(s_buf, sizeof(s_buf), "%d", beats);
+        // Flash the countdown number
+        Uint32 now = SDL_GetTicks();
+        SDL_Color cc = (now / 250) % 2 == 0 ? C_ACCENT : C_MID;
+        draw_text(r, 420, ty, 2.0f, s_buf, cc);
+        draw_text(r, 445, ty, 1.2f, "bars", C_DIM);
+    } else if (s == LOOP_PLAYING || s == LOOP_OVERDUB) {
+        float pos = loop_position();
+        int bar_w = 380;
+        int bar_x = 420;
+        int bar_y = LOOP_BTN_Y + (LOOP_BTN_H - 6) / 2;
+        fill_rect(r, bar_x, bar_y, bar_w, 6, (SDL_Color){30,30,30,255});
+        fill_rect(r, bar_x, bar_y, (int)(pos * bar_w), 6,
+                  s == LOOP_OVERDUB ? C_ACCENT : C_WHITE);
+    }
+
+    // [REC] button
+    { SDL_Rect btn = BTN_LOOP_REC;
+      int hov = pt_in_rect(mouse_x, mouse_y, btn);
+      int rec_lit = (s == LOOP_RECORDING || s == LOOP_OVERDUB || s == LOOP_ARMED);
+      // Pulse when recording
+      Uint32 now = SDL_GetTicks();
+      int pulse = rec_lit && ((now / 400) % 2 == 0);
+      SDL_Color fill = pulse ? C_ACCENT : (hov ? C_SURF : C_BG);
+      SDL_Color bord = rec_lit ? C_ACCENT : C_BORDER;
+      fill_rect(r, btn.x, btn.y, btn.w, btn.h, fill);
+      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, bord);
+      draw_text(r, btn.x+(btn.w-text_width("REC",1.3f))/2, ty, 1.3f, "REC",
+                rec_lit ? C_WHITE : C_MID); }
+}
+
+// ── Public entry point ────────────────────────────────────────────────────────
 
 void render_frame(SDL_Renderer *r) {
-    g_ren = r;
     fill_rect(r, 0, 0, WIN_W, WIN_H, C_BG);
     render_topbar(r);
     render_controls(r);

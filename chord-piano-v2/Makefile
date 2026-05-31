@@ -10,7 +10,7 @@ CFLAGS = -O2 -Wall \
          -DAMY_AUDIO_IS_MINIAUDIO=1 \
          -DMACOS
 
-LDFLAGS = $(shell sdl2-config --libs) -lSDL2_ttf \
+LDFLAGS = $(shell sdl2-config --libs) \
           -framework CoreAudio \
           -framework AudioUnit \
           -framework CoreFoundation \
