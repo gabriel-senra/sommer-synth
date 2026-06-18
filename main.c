@@ -21,6 +21,10 @@ static int find_ck(SDL_Keycode k) {
     return -1;
 }
 
+// REC is momentary: held via the on-screen button or the Space key. One latch
+// so the two sources can't fight (whichever releases first stops recording).
+static int rec_held = 0;
+
 int main(int argc, char **argv) {
     (void)argc; (void)argv;
     srand((unsigned)SDL_GetTicks());
@@ -78,15 +82,11 @@ int main(int argc, char **argv) {
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_FX_REV)) { rev_preset = (rev_preset+1)%4; apply_reverb(); }
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_FX_CHO)) { cho_preset = (cho_preset+1)%4; apply_chorus(); }
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_FX_DLY)) { dly_preset = (dly_preset+1)%4; apply_delay();  }
-                    else if (pt_in_rect(mouse_x, mouse_y, BTN_LOOP_REC)) loop_press_rec();
+                    else if (pt_in_rect(mouse_x, mouse_y, BTN_LOOP_REC))  { loop_rec_down(); rec_held = 1; }
+                    else if (pt_in_rect(mouse_x, mouse_y, BTN_LOOP_UNDO))   loop_undo_layer(looper.active_track);
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_LOOP_TOG)) {
-                        if (looper.state != LOOP_IDLE) {
-                            // stop all playing notes and reset
-                            for (int i = 0; i < NUM_LOOP_TRACKS; i++) loop_clear_track(i);
-                            looper.state = LOOP_IDLE; looper.loop_len_ms = 0;
-                        } else {
-                            loop_press_rec();
-                        }
+                        // Clear-all / panic — wipe every track and reset.
+                        for (int i = 0; i < NUM_LOOP_TRACKS; i++) loop_clear_track(i);
                     }
                     else {
                         int lt = -1;
@@ -105,8 +105,9 @@ int main(int argc, char **argv) {
                 break;
 
             case SDL_MOUSEBUTTONUP:
-                if (ev.button.button == SDL_BUTTON_LEFT && mouse_pad >= 0) {
-                    release_chord(mouse_pad); mouse_pad = -1;
+                if (ev.button.button == SDL_BUTTON_LEFT) {
+                    if (rec_held) { loop_rec_up(); rec_held = 0; }
+                    if (mouse_pad >= 0) { release_chord(mouse_pad); mouse_pad = -1; }
                 }
                 break;
 
@@ -129,6 +130,7 @@ int main(int argc, char **argv) {
                 case SDLK_LEFTBRACKET:   if (octave_shift > -2) { octave_shift--; retrigger_all_active(); } break;
                 case SDLK_RIGHTBRACKET:  if (octave_shift <  2) { octave_shift++; retrigger_all_active(); } break;
                 case SDLK_BACKSLASH:     toggle_arp(); break;
+                case SDLK_SPACE:         if (!rec_held) { loop_rec_down(); rec_held = 1; } break;
                 default: {
                     int oi = key_to_ovr(ev.key.keysym.sym);
                     if (oi >= 0) { quality_override = oi; retrigger_all_active(); break; }
@@ -139,6 +141,10 @@ int main(int argc, char **argv) {
                 break;
 
             case SDL_KEYUP: {
+                if (ev.key.keysym.sym == SDLK_SPACE) {
+                    if (rec_held) { loop_rec_up(); rec_held = 0; }
+                    break;
+                }
                 int oi = key_to_ovr(ev.key.keysym.sym);
                 if (oi >= 0 && quality_override == oi) { quality_override = -1; retrigger_all_active(); break; }
                 int ci = find_ck(ev.key.keysym.sym);

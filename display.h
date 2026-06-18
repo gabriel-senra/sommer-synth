@@ -83,8 +83,9 @@ extern const SDL_Rect BTN_FX_REV, BTN_FX_CHO, BTN_FX_DLY;
 
 // ── Button rects — loop row ───────────────────────────────────────────────────
 
-extern const SDL_Rect BTN_LOOP_TOG;
+extern const SDL_Rect BTN_LOOP_TOG;    // clear-all / panic
 extern const SDL_Rect BTN_LOOP_T[4];   // track select buttons
+extern const SDL_Rect BTN_LOOP_UNDO;   // undo last layer of active track
 extern const SDL_Rect BTN_LOOP_REC;
 
 // ── Hit-testing (used by main event loop) ────────────────────────────────────
