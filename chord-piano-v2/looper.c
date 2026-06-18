@@ -5,24 +5,7 @@
 
 Looper looper = { .state = LOOP_IDLE, .active_track = 0 };
 
-// ── Timing helpers ────────────────────────────────────────────────────────────
-
-static Uint32 beat_ms(void)  { return (Uint32)(60000 / arp_bpm); }
-static Uint32 bar_ms(void)   { return beat_ms() * 4; }
-
-static Uint32 next_bar_boundary(Uint32 from_ms) {
-    Uint32 b = bar_ms();
-    // round up to next full bar from armed_at_ms as the phase origin
-    Uint32 elapsed = from_ms - looper.armed_at_ms;
-    Uint32 bars_done = elapsed / b;
-    return looper.armed_at_ms + (bars_done + 1) * b;
-}
-
-static Uint32 nearest_bar(Uint32 duration_ms) {
-    Uint32 b = bar_ms();
-    Uint32 n = (duration_ms + b / 2) / b;
-    return (n < 1 ? 1 : n) * b;
-}
+#define MIN_LOOP_LEN_MS  200   // floor so an accidental tap can't make a 0ms loop
 
 // ── AMY note fire ─────────────────────────────────────────────────────────────
 
@@ -39,12 +22,26 @@ static void fire_off(int note) {
 
 // ── Record ────────────────────────────────────────────────────────────────────
 
+static Uint32 cur_loop_pos(Uint32 now) {
+    if (looper.loop_len_ms == 0) return now - looper.anchor_ms;   // base pass
+    return (now - looper.anchor_ms) % looper.loop_len_ms;          // overdub
+}
+
 static void record_event(int note, LoopEventType type, float vel) {
-    LoopTrack *t = &looper.tracks[looper.active_track];
+    LoopTrack *t = &looper.tracks[looper.rec_track];
     if (t->count >= MAX_LOOP_EVENTS) return;
     Uint32 now = SDL_GetTicks();
+
+    // Base pass snaps its start to the first note played — no leading silence.
+    if (looper.state == LOOP_RECORDING && !looper.rec_anchored) {
+        looper.anchor_ms    = now;
+        looper.rec_start_ms = now;
+        looper.last_pos_ms  = 0;
+        looper.rec_anchored = 1;
+    }
+
     t->events[t->count++] = (LoopEvent){
-        .time_ms  = now - looper.rec_start_ms,
+        .time_ms  = cur_loop_pos(now),
         .note     = note,
         .type     = type,
         .velocity = vel,
@@ -61,15 +58,44 @@ void loop_record_off(int note) {
         record_event(note, NOTE_OFF, 0.0f);
 }
 
+// Close any notes left sounding within an event range [from, to): record a
+// NOTE_OFF (at pos_ms) and fire it. Used when a record pass ends.
+static void close_held_in_range(int track, int from, int to, Uint32 pos_ms) {
+    LoopTrack *t = &looper.tracks[track];
+    int on[128] = {0};
+    for (int i = from; i < to; i++) {
+        if (t->events[i].type == NOTE_ON)  on[t->events[i].note] = 1;
+        if (t->events[i].type == NOTE_OFF) on[t->events[i].note] = 0;
+    }
+    for (int n = 0; n < 128; n++) {
+        if (!on[n]) continue;
+        if (t->count < MAX_LOOP_EVENTS)
+            t->events[t->count++] = (LoopEvent){ .time_ms = pos_ms, .note = n,
+                                                 .type = NOTE_OFF, .velocity = 0.0f };
+        fire_off(n);
+    }
+}
+
 // ── Playback tick ─────────────────────────────────────────────────────────────
+
+// During an overdub on rec_track, the notes being recorded this pass are already
+// sounding live (fired by synth.c) — replaying them would double-trigger. So for
+// the track currently recording, only play events from layers before the open one.
+static int track_play_limit(int ti) {
+    LoopTrack *t = &looper.tracks[ti];
+    if (looper.state == LOOP_OVERDUB && ti == looper.rec_track && t->num_layers > 0)
+        return t->layer_start[t->num_layers - 1];
+    return t->count;
+}
 
 static void play_track(int ti, Uint32 prev, Uint32 cur, Uint32 len) {
     LoopTrack *t = &looper.tracks[ti];
-    if (t->muted || t->count == 0) return;
+    int limit = track_play_limit(ti);
+    if (t->muted || limit == 0) return;
 
     int wrapped = (cur < prev);  // loop seam crossed this tick
 
-    for (int i = 0; i < t->count; i++) {
+    for (int i = 0; i < limit; i++) {
         Uint32 ts = t->events[i].time_ms;
         int fire = 0;
         if (!wrapped)
@@ -85,14 +111,11 @@ static void play_track(int ti, Uint32 prev, Uint32 cur, Uint32 len) {
             fire_off(t->events[i].note);
     }
 
-    // At the seam, silence any notes that have a NOTE_ON but no NOTE_OFF
-    // within the loop (they'd hang forever). Scan all notes that are 'on'
-    // at the seam and force a note_off.
+    // At the seam, silence any notes that have a NOTE_ON but no NOTE_OFF within
+    // the played range (they'd hang forever).
     if (wrapped) {
-        // Build a simple bitmask of notes that ended up 'on' at loop end
-        // by replaying the on/off ledger — cheap for 2048 events.
         int on[128] = {0};
-        for (int i = 0; i < t->count; i++) {
+        for (int i = 0; i < limit; i++) {
             if (t->events[i].type == NOTE_ON)  on[t->events[i].note] = 1;
             if (t->events[i].type == NOTE_OFF) on[t->events[i].note] = 0;
         }
@@ -101,21 +124,11 @@ static void play_track(int ti, Uint32 prev, Uint32 cur, Uint32 len) {
 }
 
 void loop_tick(void) {
-    Uint32 now = SDL_GetTicks();
-
-    // ARMED: wait for pre-computed bar boundary (rec_start_ms set on ARMED entry)
-    if (looper.state == LOOP_ARMED) {
-        if (now >= looper.rec_start_ms) {
-            looper.last_pos_ms = 0;
-            looper.state       = LOOP_RECORDING;
-        }
-        return;
-    }
-
     if (looper.state != LOOP_PLAYING && looper.state != LOOP_OVERDUB) return;
     if (looper.loop_len_ms == 0) return;
 
-    Uint32 pos  = (now - looper.rec_start_ms) % looper.loop_len_ms;
+    Uint32 now  = SDL_GetTicks();
+    Uint32 pos  = (now - looper.anchor_ms) % looper.loop_len_ms;
     Uint32 prev = looper.last_pos_ms;
 
     for (int i = 0; i < NUM_LOOP_TRACKS; i++)
@@ -124,100 +137,114 @@ void loop_tick(void) {
     looper.last_pos_ms = pos;
 }
 
-// ── State transitions ─────────────────────────────────────────────────────────
+// ── Record trigger (momentary) ────────────────────────────────────────────────
 
-void loop_press_rec(void) {
+void loop_rec_down(void) {
+    if (looper.state == LOOP_RECORDING || looper.state == LOOP_OVERDUB) return;
     Uint32 now = SDL_GetTicks();
-    switch (looper.state) {
 
-    case LOOP_IDLE:
-        looper.armed_at_ms  = now;
-        looper.rec_start_ms = next_bar_boundary(now);  // pre-compute target
-        looper.state        = LOOP_ARMED;
-        break;
+    looper.rec_track = looper.active_track;
+    LoopTrack *t = &looper.tracks[looper.rec_track];
 
-    case LOOP_ARMED:
-        // Cancel arm
-        looper.state = LOOP_IDLE;
-        break;
+    // Open a new layer (drop the oldest boundary if we ever overflow).
+    if (t->num_layers < MAX_LOOP_LAYERS)
+        t->layer_start[t->num_layers++] = t->count;
 
-    case LOOP_RECORDING:
-        // First pass done — quantise length and start playing
-        {
-            Uint32 recorded = now - looper.rec_start_ms;
-            looper.loop_len_ms  = nearest_bar(recorded);
-            looper.last_pos_ms  = 0;
-            // Force note-offs for anything still held at stop time
-            LoopTrack *t = &looper.tracks[looper.active_track];
-            int on[128] = {0};
-            for (int i = 0; i < t->count; i++) {
-                if (t->events[i].type == NOTE_ON)  on[t->events[i].note] = 1;
-                if (t->events[i].type == NOTE_OFF) on[t->events[i].note] = 0;
-            }
-            for (int n = 0; n < 128; n++) {
-                if (on[n]) {
-                    record_event(n, NOTE_OFF, 0.0f);
-                    fire_off(n);
-                }
-            }
-            looper.state = LOOP_PLAYING;
+    if (looper.loop_len_ms == 0) {
+        // Base pass: the loop start anchors to the first note (set in record_event),
+        // so holding REC before playing adds no leading silence.
+        looper.rec_anchored = 0;
+        looper.state        = LOOP_RECORDING;
+    } else {
+        looper.rec_anchored = 1;
+        looper.state        = LOOP_OVERDUB;
+    }
+    (void)now;
+}
+
+void loop_rec_up(void) {
+    Uint32 now = SDL_GetTicks();
+    LoopTrack *t = &looper.tracks[looper.rec_track];
+    int layer_from = (t->num_layers > 0) ? t->layer_start[t->num_layers - 1] : 0;
+
+    if (looper.state == LOOP_RECORDING) {
+        if (!looper.rec_anchored) {
+            // Held REC but never played a note — discard the empty take.
+            if (t->num_layers > 0) t->num_layers--;
+            looper.state = LOOP_IDLE;
+            return;
         }
-        break;
-
-    case LOOP_PLAYING:
-        // Start overdub on active track
-        looper.state = LOOP_OVERDUB;
-        break;
-
-    case LOOP_OVERDUB:
-        // End overdub, back to playing
-        {
-            // Force note-offs for held notes in overdub layer
-            LoopTrack *t = &looper.tracks[looper.active_track];
-            Uint32 pos = (now - looper.rec_start_ms) % looper.loop_len_ms;
-            int on[128] = {0};
-            for (int i = 0; i < t->count; i++) {
-                if (t->events[i].time_ms > looper.last_pos_ms) break; // overdub events are at end
-                if (t->events[i].type == NOTE_ON)  on[t->events[i].note] = 1;
-                if (t->events[i].type == NOTE_OFF) on[t->events[i].note] = 0;
-            }
-            for (int n = 0; n < 128; n++) {
-                if (on[n]) { record_event(n, NOTE_OFF, 0.0f); fire_off(n); }
-            }
-            looper.last_pos_ms = pos;
-            looper.state       = LOOP_PLAYING;
-        }
-        break;
+        Uint32 recorded = now - looper.rec_start_ms;
+        looper.loop_len_ms = (recorded < MIN_LOOP_LEN_MS) ? MIN_LOOP_LEN_MS : recorded;
+        // Close notes still held; stamp the NOTE_OFFs at the loop end.
+        close_held_in_range(looper.rec_track, layer_from, t->count, looper.loop_len_ms);
+        looper.last_pos_ms = 0;
+        looper.state       = LOOP_PLAYING;
+    } else if (looper.state == LOOP_OVERDUB) {
+        Uint32 pos = cur_loop_pos(now);
+        close_held_in_range(looper.rec_track, layer_from, t->count, pos);
+        looper.state = LOOP_PLAYING;
     }
 }
+
+// ── Track ops ─────────────────────────────────────────────────────────────────
 
 void loop_select_track(int track) {
     if (track < 0 || track >= NUM_LOOP_TRACKS) return;
     looper.active_track = track;
 }
 
-void loop_clear_track(int track) {
-    if (track < 0 || track >= NUM_LOOP_TRACKS) return;
-    // Silence any playing notes from this track first
+// Silence any notes left sounding by events in [from, to).
+static void silence_range(int track, int from, int to) {
     LoopTrack *t = &looper.tracks[track];
     int on[128] = {0};
-    for (int i = 0; i < t->count; i++) {
+    for (int i = from; i < to; i++) {
         if (t->events[i].type == NOTE_ON)  on[t->events[i].note] = 1;
         if (t->events[i].type == NOTE_OFF) on[t->events[i].note] = 0;
     }
     for (int n = 0; n < 128; n++) if (on[n]) fire_off(n);
+}
+
+static int all_tracks_empty(void) {
+    for (int i = 0; i < NUM_LOOP_TRACKS; i++)
+        if (looper.tracks[i].count > 0) return 0;
+    return 1;
+}
+
+void loop_undo_layer(int track) {
+    if (track < 0 || track >= NUM_LOOP_TRACKS) return;
+    LoopTrack *t = &looper.tracks[track];
+    if (t->num_layers == 0) return;
+
+    int start = t->layer_start[--t->num_layers];
+    silence_range(track, start, t->count);   // best-effort; other layers re-trigger next cycle
+    t->count = start;
+
+    if (all_tracks_empty()) {
+        looper.loop_len_ms = 0;
+        looper.last_pos_ms = 0;
+        looper.state       = LOOP_IDLE;
+    }
+}
+
+void loop_clear_track(int track) {
+    if (track < 0 || track >= NUM_LOOP_TRACKS) return;
+    LoopTrack *t = &looper.tracks[track];
+    silence_range(track, 0, t->count);
     memset(t, 0, sizeof(LoopTrack));
+
+    if (all_tracks_empty()) {
+        looper.loop_len_ms = 0;
+        looper.last_pos_ms = 0;
+        looper.state       = LOOP_IDLE;
+    }
 }
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
 
-int loop_beat_countdown(void) {
-    if (looper.state != LOOP_ARMED) return 0;
-    Uint32 now = SDL_GetTicks();
-    Uint32 b = beat_ms();
-    Uint32 remaining_ms = (looper.rec_start_ms > now) ? (looper.rec_start_ms - now) : 0;
-    int beats = (int)((remaining_ms + b - 1) / b);  // round up
-    return beats > 4 ? 4 : beats;
+int loop_track_layers(int track) {
+    if (track < 0 || track >= NUM_LOOP_TRACKS) return 0;
+    return looper.tracks[track].num_layers;
 }
 
 float loop_position(void) {

@@ -53,7 +53,7 @@ const SDL_Rect BTN_FX_REV = { 62, FX_BTN_Y, 52, FX_BTN_H};
 const SDL_Rect BTN_FX_CHO = {150, FX_BTN_Y, 52, FX_BTN_H};
 const SDL_Rect BTN_FX_DLY = {238, FX_BTN_Y, 52, FX_BTN_H};
 
-// Loop row: [LOOP]  [T1][T2][T3][T4]  ····  [REC]
+// Loop row: [CLR]  [T1][T2][T3][T4]  ····  [UNDO]  [REC]
 const SDL_Rect BTN_LOOP_TOG    = { 12, LOOP_BTN_Y,  44, LOOP_BTN_H};
 const SDL_Rect BTN_LOOP_T[4]   = {
     { 68, LOOP_BTN_Y, 80, LOOP_BTN_H},
@@ -61,6 +61,7 @@ const SDL_Rect BTN_LOOP_T[4]   = {
     {236, LOOP_BTN_Y, 80, LOOP_BTN_H},
     {320, LOOP_BTN_Y, 80, LOOP_BTN_H},
 };
+const SDL_Rect BTN_LOOP_UNDO   = {772, LOOP_BTN_Y,  60, LOOP_BTN_H};
 const SDL_Rect BTN_LOOP_REC    = {840, LOOP_BTN_Y,  52, LOOP_BTN_H};
 
 // ── Low-level draw helpers ────────────────────────────────────────────────────
@@ -382,9 +383,9 @@ static void render_pads(SDL_Renderer *r) {
 // Track state colour: empty=dim border, has content=mid, playing=white, rec=accent
 static SDL_Color loop_track_color(int ti) {
     LoopState s = looper.state;
-    int is_active = (ti == looper.active_track);
+    int is_rec = (ti == looper.rec_track);
     int has_content = (looper.tracks[ti].count > 0);
-    if (is_active && (s == LOOP_RECORDING || s == LOOP_OVERDUB))
+    if (is_rec && (s == LOOP_RECORDING || s == LOOP_OVERDUB))
         return C_ACCENT;
     if (has_content && !looper.tracks[ti].muted)
         return C_WHITE;
@@ -399,19 +400,19 @@ static void render_loop_row(SDL_Renderer *r) {
 
     int ty = LOOP_BTN_Y + (LOOP_BTN_H - (int)(13*1.3f)) / 2;
     LoopState s = looper.state;
-    int loop_active = (s != LOOP_IDLE);
+    int has_loop = (looper.loop_len_ms > 0);
 
-    // [LOOP] toggle
+    // [CLR] clear-all / panic
     { SDL_Rect btn = BTN_LOOP_TOG;
-      SDL_Color fill = loop_active ? C_ACCENT : (pt_in_rect(mouse_x,mouse_y,btn) ? C_SURF : C_BG);
-      SDL_Color bord = loop_active ? C_ACCENT : C_BORDER;
+      int hov = pt_in_rect(mouse_x, mouse_y, btn);
+      SDL_Color fill = hov ? C_SURF : C_BG;
       fill_rect(r, btn.x, btn.y, btn.w, btn.h, fill);
-      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, bord);
-      draw_text(r, btn.x+(btn.w-text_width("LOOP",1.3f))/2, ty, 1.3f, "LOOP",
-                loop_active ? C_WHITE : C_MID); }
+      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, has_loop ? C_MID : C_BORDER);
+      draw_text(r, btn.x+(btn.w-text_width("CLR",1.3f))/2, ty, 1.3f, "CLR",
+                has_loop ? C_WHITE : C_DIM); }
 
-    // Track buttons
-    static const char *TRACK_NAMES[4] = {"T1 BASS","T2 CHORD","T3 LEAD","T4 DRUM"};
+    // Track buttons (name + layer count)
+    static const char *TRACK_NAMES[4] = {"T1 BASS","T2 CHORD","T3 LEAD","T4 INST"};
     for (int i = 0; i < NUM_LOOP_TRACKS; i++) {
         SDL_Rect btn = BTN_LOOP_T[i];
         int is_active = (i == looper.active_track);
@@ -423,34 +424,38 @@ static void render_loop_row(SDL_Renderer *r) {
         SDL_Color bord = is_active ? C_HI : (looper.tracks[i].count > 0 ? C_MID : C_DIM);
         fill_rect(r, btn.x, btn.y, btn.w, btn.h, fill);
         draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, bord);
-        draw_text(r, btn.x+(btn.w-text_width(TRACK_NAMES[i],1.2f))/2, ty, 1.2f,
-                  TRACK_NAMES[i], tc.r==0&&tc.g==0&&tc.b==0 ? C_DIM : tc);
+        SDL_Color txt = (tc.r==0&&tc.g==0&&tc.b==0) ? C_DIM : tc;
+        int layers = loop_track_layers(i);
+        char lbl[20];
+        if (layers > 0) snprintf(lbl, sizeof(lbl), "%s x%d", TRACK_NAMES[i], layers);
+        else            snprintf(lbl, sizeof(lbl), "%s", TRACK_NAMES[i]);
+        draw_text(r, btn.x+(btn.w-text_width(lbl,1.2f))/2, ty, 1.2f, lbl, txt);
     }
 
-    // Position bar (when playing) or beat countdown (when armed)
-    if (s == LOOP_ARMED) {
-        int beats = loop_beat_countdown();
-        char s_buf[8]; snprintf(s_buf, sizeof(s_buf), "%d", beats);
-        // Flash the countdown number
-        Uint32 now = SDL_GetTicks();
-        SDL_Color cc = (now / 250) % 2 == 0 ? C_ACCENT : C_MID;
-        draw_text(r, 420, ty, 2.0f, s_buf, cc);
-        draw_text(r, 445, ty, 1.2f, "bars", C_DIM);
-    } else if (s == LOOP_PLAYING || s == LOOP_OVERDUB) {
+    // Position bar (when a loop exists)
+    if (s == LOOP_PLAYING || s == LOOP_OVERDUB) {
         float pos = loop_position();
-        int bar_w = 380;
         int bar_x = 420;
+        int bar_w = BTN_LOOP_UNDO.x - 12 - bar_x;
         int bar_y = LOOP_BTN_Y + (LOOP_BTN_H - 6) / 2;
         fill_rect(r, bar_x, bar_y, bar_w, 6, (SDL_Color){30,30,30,255});
         fill_rect(r, bar_x, bar_y, (int)(pos * bar_w), 6,
                   s == LOOP_OVERDUB ? C_ACCENT : C_WHITE);
     }
 
-    // [REC] button
+    // [UNDO] last layer of active track
+    { SDL_Rect btn = BTN_LOOP_UNDO;
+      int hov = pt_in_rect(mouse_x, mouse_y, btn);
+      int can_undo = (loop_track_layers(looper.active_track) > 0);
+      fill_rect(r, btn.x, btn.y, btn.w, btn.h, hov && can_undo ? C_SURF : C_BG);
+      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, can_undo ? C_MID : C_BORDER);
+      draw_text(r, btn.x+(btn.w-text_width("UNDO",1.2f))/2, ty, 1.2f, "UNDO",
+                can_undo ? C_WHITE : C_DIM); }
+
+    // [REC] button — lit/pulsing while a hold is recording
     { SDL_Rect btn = BTN_LOOP_REC;
       int hov = pt_in_rect(mouse_x, mouse_y, btn);
-      int rec_lit = (s == LOOP_RECORDING || s == LOOP_OVERDUB || s == LOOP_ARMED);
-      // Pulse when recording
+      int rec_lit = (s == LOOP_RECORDING || s == LOOP_OVERDUB);
       Uint32 now = SDL_GetTicks();
       int pulse = rec_lit && ((now / 400) % 2 == 0);
       SDL_Color fill = pulse ? C_ACCENT : (hov ? C_SURF : C_BG);
