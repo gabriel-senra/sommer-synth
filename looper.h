@@ -20,7 +20,7 @@ typedef struct {
     int       muted;
     int       layer_start[MAX_LOOP_LAYERS]; // event index where each layer began
     int       num_layers;
-    // future: int synth;  // per-track AMY patch — deferred
+    int       patch;                        // AMY patch this track was recorded with
 } LoopTrack;
 
 typedef enum {

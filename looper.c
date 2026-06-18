@@ -5,18 +5,33 @@
 
 Looper looper = { .state = LOOP_IDLE, .active_track = 0 };
 
-#define MIN_LOOP_LEN_MS  200   // floor so an accidental tap can't make a 0ms loop
+#define MIN_LOOP_LEN_MS    200   // floor so an accidental tap can't make a 0ms loop
+#define LOOP_TRACK_VOICES  12    // per-track polyphony (each track is its own AMY synth)
+
+// Each loop track plays on its own AMY synth so it keeps the patch it was
+// recorded with, independent of the live keyboard (synth 0).
+static int track_synth(int track) { return track + 1; }
 
 // ── AMY note fire ─────────────────────────────────────────────────────────────
 
-static void fire_on(int note, float vel) {
+static void fire_on(int synth, int note, float vel) {
     amy_event e = amy_default_event();
-    e.synth = 0; e.midi_note = (float)note; e.velocity = vel;
+    e.synth = (uint8_t)synth; e.midi_note = (float)note; e.velocity = vel;
     amy_add_event(&e);
 }
-static void fire_off(int note) {
+static void fire_off(int synth, int note) {
     amy_event e = amy_default_event();
-    e.synth = 0; e.midi_note = (float)note; e.velocity = 0.0f;
+    e.synth = (uint8_t)synth; e.midi_note = (float)note; e.velocity = 0.0f;
+    amy_add_event(&e);
+}
+
+// Load a patch into a track's own synth slot (done once when a track is first
+// recorded, so changing the live patch later doesn't alter the recorded loop).
+static void load_track_patch(int track, int patch) {
+    amy_event e = amy_default_event();
+    e.synth        = (uint8_t)track_synth(track);
+    e.num_voices   = LOOP_TRACK_VOICES;
+    e.patch_number = (uint16_t)patch;
     amy_add_event(&e);
 }
 
@@ -72,7 +87,7 @@ static void close_held_in_range(int track, int from, int to, Uint32 pos_ms) {
         if (t->count < MAX_LOOP_EVENTS)
             t->events[t->count++] = (LoopEvent){ .time_ms = pos_ms, .note = n,
                                                  .type = NOTE_OFF, .velocity = 0.0f };
-        fire_off(n);
+        fire_off(track_synth(track), n);
     }
 }
 
@@ -88,38 +103,49 @@ static int track_play_limit(int ti) {
     return t->count;
 }
 
+static void fire_event(int synth, const LoopEvent *e) {
+    if (e->type == NOTE_ON) fire_on(synth, e->note, e->velocity);
+    else                    fire_off(synth, e->note);
+}
+
+// Silence everything still sounding at the loop's end (notes with a NOTE_ON and
+// no matching NOTE_OFF in the played range).
+static void silence_loop_tail(LoopTrack *t, int limit, int synth) {
+    int on[128] = {0};
+    for (int i = 0; i < limit; i++) {
+        if (t->events[i].type == NOTE_ON) on[t->events[i].note] = 1;
+        else                              on[t->events[i].note] = 0;
+    }
+    for (int n = 0; n < 128; n++) if (on[n]) fire_off(synth, n);
+}
+
 static void play_track(int ti, Uint32 prev, Uint32 cur, Uint32 len) {
+    (void)len;
     LoopTrack *t = &looper.tracks[ti];
     int limit = track_play_limit(ti);
     if (t->muted || limit == 0) return;
+    int synth = track_synth(ti);
 
-    int wrapped = (cur < prev);  // loop seam crossed this tick
-
-    for (int i = 0; i < limit; i++) {
-        Uint32 ts = t->events[i].time_ms;
-        int fire = 0;
-        if (!wrapped)
-            fire = (ts > prev && ts <= cur);
-        else
-            // events in [prev, len) ∪ [0, cur]
-            fire = (ts > prev && ts < len) || (ts <= cur);
-        if (!fire) continue;
-
-        if (t->events[i].type == NOTE_ON)
-            fire_on(t->events[i].note, t->events[i].velocity);
-        else
-            fire_off(t->events[i].note);
+    if (cur >= prev) {
+        // No seam this tick — fire events in (prev, cur].
+        for (int i = 0; i < limit; i++) {
+            Uint32 ts = t->events[i].time_ms;
+            if (ts > prev && ts <= cur) fire_event(synth, &t->events[i]);
+        }
+        return;
     }
 
-    // At the seam, silence any notes that have a NOTE_ON but no NOTE_OFF within
-    // the played range (they'd hang forever).
-    if (wrapped) {
-        int on[128] = {0};
-        for (int i = 0; i < limit; i++) {
-            if (t->events[i].type == NOTE_ON)  on[t->events[i].note] = 1;
-            if (t->events[i].type == NOTE_OFF) on[t->events[i].note] = 0;
-        }
-        for (int n = 0; n < 128; n++) if (on[n]) fire_off(n);
+    // Seam crossed this tick. Order matters: finish the old loop and silence
+    // anything still ringing BEFORE the new loop's opening notes, otherwise the
+    // last note we played bleeds over the loop's first note.
+    for (int i = 0; i < limit; i++) {                 // tail of old loop: (prev, len]
+        Uint32 ts = t->events[i].time_ms;
+        if (ts > prev) fire_event(synth, &t->events[i]);
+    }
+    silence_loop_tail(t, limit, synth);                // kill anything still held at loop end
+    for (int i = 0; i < limit; i++) {                 // start of new loop: [0, cur]
+        Uint32 ts = t->events[i].time_ms;
+        if (ts <= cur) fire_event(synth, &t->events[i]);
     }
 }
 
@@ -145,6 +171,13 @@ void loop_rec_down(void) {
 
     looper.rec_track = looper.active_track;
     LoopTrack *t = &looper.tracks[looper.rec_track];
+
+    // First take on an empty track captures the current patch into the track's
+    // own synth, so later live-patch changes don't alter the recorded loop.
+    if (t->count == 0) {
+        t->patch = current_patch;
+        load_track_patch(looper.rec_track, t->patch);
+    }
 
     // Open a new layer (drop the oldest boundary if we ever overflow).
     if (t->num_layers < MAX_LOOP_LAYERS)
@@ -202,7 +235,7 @@ static void silence_range(int track, int from, int to) {
         if (t->events[i].type == NOTE_ON)  on[t->events[i].note] = 1;
         if (t->events[i].type == NOTE_OFF) on[t->events[i].note] = 0;
     }
-    for (int n = 0; n < 128; n++) if (on[n]) fire_off(n);
+    for (int n = 0; n < 128; n++) if (on[n]) fire_off(track_synth(track), n);
 }
 
 static int all_tracks_empty(void) {
