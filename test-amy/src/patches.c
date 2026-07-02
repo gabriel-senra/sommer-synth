@@ -1143,7 +1143,7 @@ void patches_load_patch(amy_event *e) {
                 if(good) {
                     //fprintf(stderr, "found %d consecutive oscs starting at %d for voice %d\n", patch_oscs[patch_number], osc, voices[v]);
                     //fprintf(stderr, "setting base osc for voice %d to %d\n", voices[v], osc);
-                    voice_to_base_osc[voices[v]] = osc; 
+                    voice_to_base_osc[voices[v]] = osc;
                     for(uint16_t j=0; j < oscs_per_voice; j++) {
                         //fprintf(stderr, "setting osc %d for voice %d to amy osc %d\n", j, voices[v], osc+j);
                         osc_to_voice[osc+j] = voices[v];

@@ -3,6 +3,7 @@
 #include "looper.h"
 #include "amy.h"
 #include <string.h>
+#include <stdio.h>   // DEBUG: temporary diagnostics
 
 static int ck_root_midi(int i) {
     return 48 + current_key + MAJOR_SCALE[CK[i].degree] + CK[i].oct_off + octave_shift * 12;
@@ -45,6 +46,7 @@ void load_patch(int patch) {
     memset(note_count, 0, sizeof(note_count));
     for (int i = 0; i < NUM_CK; i++) arp_st[i].cur_note = -1;
     current_patch = patch;
+    fprintf(stderr, "[live] load_patch synth=0 patch=%d\n", patch);  // DEBUG
     amy_event e = amy_default_event();
     e.synth = 0; e.num_voices = 32; e.patch_number = (uint16_t)patch;
     amy_add_event(&e);

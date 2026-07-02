@@ -33,10 +33,14 @@ int main(int argc, char **argv) {
     amy_config_t cfg = amy_default_config();
     cfg.audio                   = AMY_AUDIO_IS_MINIAUDIO;
     cfg.features.default_synths = 0;
+    cfg.max_voices              = 128;   // synth 0 (live) + one synth per loop track
+    cfg.max_oscs                = 512;
     cfg.features.reverb         = 1;
     cfg.features.chorus         = 1;
     cfg.features.echo           = 1;
     amy_start(cfg);
+    fprintf(stderr, "=== chord-piano-v2 PER-TRACK-SYNTH build (max_oscs=%d max_voices=%d) ===\n",
+            cfg.max_oscs, cfg.max_voices);  // DEBUG
     load_patch(0);
     apply_all_fx();
 
