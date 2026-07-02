@@ -9,6 +9,7 @@
 #include "synth.h"
 #include "fx.h"
 #include "looper.h"
+#include "transport.h"
 #include "display.h"
 #include "arp.h"
 
@@ -42,6 +43,7 @@ int main(int argc, char **argv) {
     fprintf(stderr, "=== chord-piano-v2 PER-TRACK-SYNTH build (max_oscs=%d max_voices=%d) ===\n",
             cfg.max_oscs, cfg.max_voices);  // DEBUG
     load_patch(0);
+    transport_init();
     apply_all_fx();
 
     if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_EVENTS) < 0) {
@@ -56,6 +58,7 @@ int main(int argc, char **argv) {
     int running = 1;
     while (running) {
         arp_tick();
+        transport_tick();
         loop_tick();
 
         SDL_Event ev;
@@ -76,8 +79,10 @@ int main(int argc, char **argv) {
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_OCT_UP)   && octave_shift <  2) { octave_shift++; retrigger_all_active(); }
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_ARP_TOG))                toggle_arp();
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_ARP_DIV))                arp_div_idx = (arp_div_idx+1)%4;
-                    else if (pt_in_rect(mouse_x, mouse_y, BTN_BPM_DOWN) && arp_bpm >  40) { arp_bpm -= 5; apply_delay(); }
-                    else if (pt_in_rect(mouse_x, mouse_y, BTN_BPM_UP)   && arp_bpm < 240) { arp_bpm += 5; apply_delay(); }
+                    // BPM is locked while a loop exists — changing it would drift
+                    // the click out of sync with already-recorded (ms-based) loops.
+                    else if (pt_in_rect(mouse_x, mouse_y, BTN_BPM_DOWN) && arp_bpm >  40 && looper.loop_len_ms == 0) { arp_bpm -= 5; apply_delay(); }
+                    else if (pt_in_rect(mouse_x, mouse_y, BTN_BPM_UP)   && arp_bpm < 240 && looper.loop_len_ms == 0) { arp_bpm += 5; apply_delay(); }
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_ARP_ORD))                arp_order = (ArpOrder)((arp_order+1)%4);
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_ARPOCT_DOWN) && arp_octaves > 1) arp_octaves--;
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_ARPOCT_UP)   && arp_octaves < 3) arp_octaves++;
@@ -86,6 +91,7 @@ int main(int argc, char **argv) {
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_FX_REV)) { rev_preset = (rev_preset+1)%4; apply_reverb(); }
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_FX_CHO)) { cho_preset = (cho_preset+1)%4; apply_chorus(); }
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_FX_DLY)) { dly_preset = (dly_preset+1)%4; apply_delay();  }
+                    else if (pt_in_rect(mouse_x, mouse_y, BTN_LOOP_PLAY))   transport_toggle();
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_LOOP_REC))  { loop_rec_down(); rec_held = 1; }
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_LOOP_UNDO))   loop_undo_layer(looper.active_track);
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_LOOP_TOG)) {

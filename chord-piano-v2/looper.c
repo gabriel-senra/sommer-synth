@@ -1,5 +1,6 @@
 #include "looper.h"
 #include "state.h"
+#include "transport.h"
 #include "amy.h"
 #include <string.h>
 #include <stdio.h>   // DEBUG: temporary diagnostics
@@ -50,10 +51,13 @@ static void record_event(int note, LoopEventType type, float vel) {
     if (t->count >= MAX_LOOP_EVENTS) return;
     Uint32 now = SDL_GetTicks();
 
-    // Base pass snaps its start to the first note played — no leading silence.
+    // Base pass anchors on the first note played. With the metronome running the
+    // origin snaps back to the bar line at or before that note, so the loop
+    // phase-locks to the click while the note keeps its natural offset into the
+    // bar (no quantization). Free (metronome off) anchors right on the note.
     if (looper.state == LOOP_RECORDING && !looper.rec_anchored) {
-        looper.anchor_ms    = now;
-        looper.rec_start_ms = now;
+        looper.anchor_ms    = transport_active() ? transport_grid_origin(now) : now;
+        looper.rec_start_ms = looper.anchor_ms;
         looper.last_pos_ms  = 0;
         looper.rec_anchored = 1;
     }
@@ -211,7 +215,11 @@ void loop_rec_up(void) {
             return;
         }
         Uint32 recorded = now - looper.rec_start_ms;
-        looper.loop_len_ms = (recorded < MIN_LOOP_LEN_MS) ? MIN_LOOP_LEN_MS : recorded;
+        // Metronome running → snap length to a whole number of bars (loop stays
+        // locked to the click). Otherwise keep the free, as-played length.
+        looper.loop_len_ms = transport_active()
+            ? transport_snap_len(recorded)
+            : ((recorded < MIN_LOOP_LEN_MS) ? MIN_LOOP_LEN_MS : recorded);
         // Close notes still held; stamp the NOTE_OFFs at the loop end.
         close_held_in_range(looper.rec_track, layer_from, t->count, looper.loop_len_ms);
         looper.last_pos_ms = 0;

@@ -2,6 +2,7 @@
 #include "chords.h"
 #include "fx.h"
 #include "looper.h"
+#include "transport.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -53,7 +54,7 @@ const SDL_Rect BTN_FX_REV = { 62, FX_BTN_Y, 52, FX_BTN_H};
 const SDL_Rect BTN_FX_CHO = {150, FX_BTN_Y, 52, FX_BTN_H};
 const SDL_Rect BTN_FX_DLY = {238, FX_BTN_Y, 52, FX_BTN_H};
 
-// Loop row: [CLR]  [T1][T2][T3][T4]  ····  [UNDO]  [REC]
+// Loop row: [CLR]  [T1][T2][T3][T4]  [PLAY] ●●●● ····  [UNDO]  [REC]
 const SDL_Rect BTN_LOOP_TOG    = { 12, LOOP_BTN_Y,  44, LOOP_BTN_H};
 const SDL_Rect BTN_LOOP_T[4]   = {
     { 68, LOOP_BTN_Y, 80, LOOP_BTN_H},
@@ -61,6 +62,7 @@ const SDL_Rect BTN_LOOP_T[4]   = {
     {236, LOOP_BTN_Y, 80, LOOP_BTN_H},
     {320, LOOP_BTN_Y, 80, LOOP_BTN_H},
 };
+const SDL_Rect BTN_LOOP_PLAY   = {406, LOOP_BTN_Y,  46, LOOP_BTN_H};
 const SDL_Rect BTN_LOOP_UNDO   = {772, LOOP_BTN_Y,  60, LOOP_BTN_H};
 const SDL_Rect BTN_LOOP_REC    = {840, LOOP_BTN_Y,  52, LOOP_BTN_H};
 
@@ -432,10 +434,27 @@ static void render_loop_row(SDL_Renderer *r) {
         draw_text(r, btn.x+(btn.w-text_width(lbl,1.2f))/2, ty, 1.2f, lbl, txt);
     }
 
+    // [PLAY] metronome toggle + 4-beat indicator
+    { SDL_Rect btn = BTN_LOOP_PLAY;
+      int hov = pt_in_rect(mouse_x, mouse_y, btn);
+      int on  = transport_active();
+      fill_rect(r, btn.x, btn.y, btn.w, btn.h, on ? C_HI : (hov ? C_SURF : C_BG));
+      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, on ? C_HI : C_BORDER);
+      const char *lbl = on ? "STOP" : "PLAY";
+      draw_text(r, btn.x+(btn.w-text_width(lbl,1.2f))/2, ty, 1.2f, lbl,
+                on ? C_BLACK : C_MID);
+      int dx = btn.x + btn.w + 10;
+      int dy = LOOP_BTN_Y + (LOOP_BTN_H - 8) / 2;
+      for (int b = 0; b < BEATS_PER_BAR; b++) {
+          int lit = on && (transport.cur_beat == b);
+          SDL_Color dc = lit ? (b == 0 ? C_ACCENT : C_WHITE) : (SDL_Color){40,40,40,255};
+          fill_rect(r, dx + b*14, dy, 8, 8, dc);
+      } }
+
     // Position bar (when a loop exists)
     if (s == LOOP_PLAYING || s == LOOP_OVERDUB) {
         float pos = loop_position();
-        int bar_x = 420;
+        int bar_x = 524;
         int bar_w = BTN_LOOP_UNDO.x - 12 - bar_x;
         int bar_y = LOOP_BTN_Y + (LOOP_BTN_H - 6) / 2;
         fill_rect(r, bar_x, bar_y, bar_w, 6, (SDL_Color){30,30,30,255});
