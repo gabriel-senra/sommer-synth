@@ -1,7 +1,9 @@
 #include "looper.h"
 #include "state.h"
+#include "transport.h"
 #include "amy.h"
 #include <string.h>
+#include <stdio.h>   // DEBUG: temporary diagnostics
 
 Looper looper = { .state = LOOP_IDLE, .active_track = 0 };
 
@@ -28,6 +30,8 @@ static void fire_off(int synth, int note) {
 // Load a patch into a track's own synth slot (done once when a track is first
 // recorded, so changing the live patch later doesn't alter the recorded loop).
 static void load_track_patch(int track, int patch) {
+    fprintf(stderr, "[loop] SETUP track=%d -> synth=%d patch=%d\n",
+            track, track_synth(track), patch);  // DEBUG
     amy_event e = amy_default_event();
     e.synth        = (uint8_t)track_synth(track);
     e.num_voices   = LOOP_TRACK_VOICES;
@@ -47,10 +51,13 @@ static void record_event(int note, LoopEventType type, float vel) {
     if (t->count >= MAX_LOOP_EVENTS) return;
     Uint32 now = SDL_GetTicks();
 
-    // Base pass snaps its start to the first note played — no leading silence.
+    // Base pass anchors on the first note played. With the metronome running the
+    // origin snaps back to the bar line at or before that note, so the loop
+    // phase-locks to the click while the note keeps its natural offset into the
+    // bar (no quantization). Free (metronome off) anchors right on the note.
     if (looper.state == LOOP_RECORDING && !looper.rec_anchored) {
-        looper.anchor_ms    = now;
-        looper.rec_start_ms = now;
+        looper.anchor_ms    = transport_active() ? transport_grid_origin(now) : now;
+        looper.rec_start_ms = looper.anchor_ms;
         looper.last_pos_ms  = 0;
         looper.rec_anchored = 1;
     }
@@ -208,7 +215,11 @@ void loop_rec_up(void) {
             return;
         }
         Uint32 recorded = now - looper.rec_start_ms;
-        looper.loop_len_ms = (recorded < MIN_LOOP_LEN_MS) ? MIN_LOOP_LEN_MS : recorded;
+        // Metronome running → snap length to a whole number of bars (loop stays
+        // locked to the click). Otherwise keep the free, as-played length.
+        looper.loop_len_ms = transport_active()
+            ? transport_snap_len(recorded)
+            : ((recorded < MIN_LOOP_LEN_MS) ? MIN_LOOP_LEN_MS : recorded);
         // Close notes still held; stamp the NOTE_OFFs at the loop end.
         close_held_in_range(looper.rec_track, layer_from, t->count, looper.loop_len_ms);
         looper.last_pos_ms = 0;
@@ -227,15 +238,16 @@ void loop_select_track(int track) {
     looper.active_track = track;
 }
 
-// Silence any notes left sounding by events in [from, to).
+// Silence any note that events in [from, to) could be sounding right now. We
+// can't use a net on/off ledger here: a note sustaining across the current
+// playhead has its NOTE_OFF later in the range, so the ledger would think it's
+// off and leave it hanging. Note-off every pitch that has a NOTE_ON in range.
 static void silence_range(int track, int from, int to) {
     LoopTrack *t = &looper.tracks[track];
-    int on[128] = {0};
-    for (int i = from; i < to; i++) {
-        if (t->events[i].type == NOTE_ON)  on[t->events[i].note] = 1;
-        if (t->events[i].type == NOTE_OFF) on[t->events[i].note] = 0;
-    }
-    for (int n = 0; n < 128; n++) if (on[n]) fire_off(track_synth(track), n);
+    int seen[128] = {0};
+    for (int i = from; i < to; i++)
+        if (t->events[i].type == NOTE_ON) seen[t->events[i].note] = 1;
+    for (int n = 0; n < 128; n++) if (seen[n]) fire_off(track_synth(track), n);
 }
 
 static int all_tracks_empty(void) {
