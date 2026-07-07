@@ -42,7 +42,7 @@ AMY_OBJS = \
     $(BUILD)/amy_midi.o \
     $(BUILD)/macos_midi.o
 
-SRCS = main.c state.c chords.c arp.c synth.c fx.c display.c looper.c transport.c
+SRCS = main.c state.c chords.c arp.c synth.c fx.c display.c transport.c
 OBJS = $(SRCS:.c=.o)
 
 all: chord_piano_v2

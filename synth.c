@@ -1,9 +1,7 @@
 #include "synth.h"
 #include "chords.h"
-#include "looper.h"
 #include "amy.h"
 #include <string.h>
-#include <stdio.h>   // DEBUG: temporary diagnostics
 
 static int ck_root_midi(int i) {
     return 48 + current_key + MAJOR_SCALE[CK[i].degree] + CK[i].oct_off + octave_shift * 12;
@@ -28,6 +26,12 @@ void amy_note_off_midi(int m) {
 }
 
 int notes_for(int ci, int *notes) {
+    if (piano_mode) {
+        int m = piano_midi(ci);
+        if (m < 0) return 0;          // gap key — no black note here
+        notes[0] = m;
+        return 1;
+    }
     switch (row_mode_for(ci)) {
         case ROW_BASS: notes[0] = ck_bass_midi(ci); return 1;
         case ROW_LEAD: notes[0] = ck_lead_midi(ci); return 1;
@@ -46,7 +50,6 @@ void load_patch(int patch) {
     memset(note_count, 0, sizeof(note_count));
     for (int i = 0; i < NUM_CK; i++) arp_st[i].cur_note = -1;
     current_patch = patch;
-    fprintf(stderr, "[live] load_patch synth=0 patch=%d\n", patch);  // DEBUG
     amy_event e = amy_default_event();
     e.synth = 0; e.num_voices = 32; e.patch_number = (uint16_t)patch;
     amy_add_event(&e);
@@ -72,7 +75,6 @@ void trigger_chord(int ci) {
             if (m < 0 || m > 127) continue;
             if (note_count[m] == 0) amy_note_on_midi(m);
             note_count[m]++;
-            loop_record_on(m, 0.75f);
         }
     }
 }
@@ -87,7 +89,6 @@ void release_chord(int ci) {
             int m = actv[ci].notes[i];
             if (m < 0 || m > 127) continue;
             if (--note_count[m] <= 0) { note_count[m] = 0; amy_note_off_midi(m); }
-            loop_record_off(m);
         }
     }
     actv[ci].active = 0; actv[ci].num = 0;
@@ -121,7 +122,7 @@ void retrigger_all_active(void) {
     }
 }
 
-void toggle_arp(void) {
+static void silence_all(void) {
     for (int i = 0; i < NUM_CK; i++) {
         if (!actv[i].active) continue;
         if (arp_on) arp_stop_note(i);
@@ -134,5 +135,14 @@ void toggle_arp(void) {
     }
     memset(note_count, 0, sizeof(note_count));
     for (int i = 0; i < NUM_CK; i++) arp_st[i].cur_note = -1;
+}
+
+void toggle_arp(void) {
+    silence_all();            // clean switch before flipping mode
     arp_on ^= 1;
+}
+
+void toggle_piano_mode(void) {
+    silence_all();
+    piano_mode ^= 1;
 }

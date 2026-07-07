@@ -68,6 +68,7 @@ extern const SDL_Color MODE_COL[3], MODE_TEXT_COL[3];
 extern const SDL_Rect BTN_KEY_PREV, BTN_KEY_NEXT;
 extern const SDL_Rect BTN_PATCH_PREV, BTN_PATCH_NEXT;
 extern const SDL_Rect BTN_BASS, BTN_OCT_DOWN, BTN_OCT_UP;
+extern const SDL_Rect BTN_MODE;   // SCALE / PIANO toggle
 
 // ── Button rects — arp row ────────────────────────────────────────────────────
 
@@ -81,13 +82,9 @@ extern const SDL_Rect BTN_ARP_GATE, BTN_ARP_HOLD;
 
 extern const SDL_Rect BTN_FX_REV, BTN_FX_CHO, BTN_FX_DLY;
 
-// ── Button rects — loop row ───────────────────────────────────────────────────
+// ── Button rects — metronome row ──────────────────────────────────────────────
 
-extern const SDL_Rect BTN_LOOP_TOG;    // clear-all / panic
-extern const SDL_Rect BTN_LOOP_T[4];   // track select buttons
-extern const SDL_Rect BTN_LOOP_PLAY;   // metronome play/stop
-extern const SDL_Rect BTN_LOOP_UNDO;   // undo last layer of active track
-extern const SDL_Rect BTN_LOOP_REC;
+extern const SDL_Rect BTN_METRO;       // metronome play/stop
 
 // ── Hit-testing (used by main event loop) ────────────────────────────────────
 

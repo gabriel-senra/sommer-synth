@@ -1,12 +1,12 @@
 #pragma once
 #include <SDL.h>
 
-// Master metronome / transport clock. Owns the bar grid the looper phase-locks
-// to. The click is a one-shot percussive note on its own AMY synth slot, so it
-// never steals voices from the live keyboard (synth 0) or the loop tracks (1-4).
+// Master metronome / transport clock — a click you can play along to. The click
+// is a one-shot percussive note on its own AMY synth slot, so it never steals
+// voices from the live keyboard (synth 0).
 
 #define BEATS_PER_BAR  4
-#define METRO_SYNTH    5     // AMY synth slot for the click
+#define METRO_SYNTH    1     // AMY synth slot for the click (0 = live keyboard)
 
 typedef struct {
     int    running;          // metronome click on/off
@@ -27,7 +27,3 @@ void transport_init(void);      // load the click patch into METRO_SYNTH (once)
 void transport_toggle(void);    // PLAY / STOP button
 void transport_tick(void);      // fire clicks + advance cur_beat; call each frame
 int  transport_active(void);    // metronome currently running?
-
-// Grid helpers used by the looper to lock recordings to bars.
-Uint32 transport_grid_origin(Uint32 t);  // downbeat at or before t
-Uint32 transport_snap_len(Uint32 span);   // span rounded to nearest whole bar (min 1)

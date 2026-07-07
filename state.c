@@ -8,6 +8,26 @@ const ChordKey CK[NUM_CK] = {
     {SDLK_k,0,24,"K"},
 };
 
+// Piano-mode semitone offsets (relative to PIANO_BASE + current_key):
+//   bottom row A S D F G H J = white keys C D E F G A B
+//   top row    Q W E R T Y U = black keys C# D# _ F# G# A# _  (-1 = gap)
+//   K = white C an octave above the bottom row's C
+const int PIANO_SEMI[NUM_CK] = {
+    0, 2, 4, 5, 7, 9, 11,
+    1, 3, -1, 6, 8, 10, -1,
+    12,
+};
+int     piano_mode       = 0;
+
+int piano_midi(int ci) {
+    if (PIANO_SEMI[ci] < 0) return -1;
+    return PIANO_BASE + current_key + PIANO_SEMI[ci] + octave_shift * 12;
+}
+int piano_is_black(int ci) {
+    int s = PIANO_SEMI[ci];
+    return s == 1 || s == 3 || s == 6 || s == 8 || s == 10;
+}
+
 int     current_key      = 0;
 int     voice_level      = 0;
 int     bass_on          = 0;

@@ -8,7 +8,6 @@
 #include "state.h"
 #include "synth.h"
 #include "fx.h"
-#include "looper.h"
 #include "transport.h"
 #include "display.h"
 #include "arp.h"
@@ -21,10 +20,6 @@ static int find_ck(SDL_Keycode k) {
     for (int i = 0; i < NUM_CK; i++) if (CK[i].key == k) return i;
     return -1;
 }
-
-// REC is momentary: held via the on-screen button or the Space key. One latch
-// so the two sources can't fight (whichever releases first stops recording).
-static int rec_held = 0;
 
 // Master headroom. AMY sums every voice (live chord + bass + 4 loop synths) plus
 // reverb/chorus/echo into one bus, then hard-clips at full scale. Hot patches blow
@@ -46,19 +41,16 @@ int main(int argc, char **argv) {
     amy_config_t cfg = amy_default_config();
     cfg.audio                   = AMY_AUDIO_IS_MINIAUDIO;
     cfg.features.default_synths = 0;
-    cfg.max_voices              = 128;   // synth 0 (live) + one synth per loop track
-    // Every synth holds its full voice allocation at once: live (32 voices) +
-    // 4 loop tracks (12 each) + metro, and complex patches use 8 oscs/voice.
-    // 512 oscs ran out (~640 needed), so a track patch load would fail and,
-    // worse, reloading the live patch reshuffled the shared pool — making a
-    // recorded track jump to a random timbre. 1024 fits the worst case + FX.
-    cfg.max_oscs                = 1024;
+    // Live keyboard (synth 0, 32 voices) + metronome click (synth 1). Complex
+    // patches use up to 8 oscs/voice, so 32*8 + a few for the click is the worst
+    // case. Generous headroom for the desktop sim; the hardware target runs far
+    // leaner (see the ESP32 voice-budget notes).
+    cfg.max_voices              = 48;
+    cfg.max_oscs                = 384;
     cfg.features.reverb         = 1;
     cfg.features.chorus         = 1;
     cfg.features.echo           = 1;
     amy_start(cfg);
-    fprintf(stderr, "=== chord-piano-v2 PER-TRACK-SYNTH build (max_oscs=%d max_voices=%d) ===\n",
-            cfg.max_oscs, cfg.max_voices);  // DEBUG
     set_master_volume(MASTER_VOLUME);
     load_patch(0);
     transport_init();
@@ -77,7 +69,6 @@ int main(int argc, char **argv) {
     while (running) {
         arp_tick();
         transport_tick();
-        loop_tick();
 
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
@@ -95,12 +86,11 @@ int main(int argc, char **argv) {
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_BASS))                   bass_on ^= 1;
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_OCT_DOWN) && octave_shift > -2) { octave_shift--; retrigger_all_active(); }
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_OCT_UP)   && octave_shift <  2) { octave_shift++; retrigger_all_active(); }
+                    else if (pt_in_rect(mouse_x, mouse_y, BTN_MODE))                   toggle_piano_mode();
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_ARP_TOG))                toggle_arp();
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_ARP_DIV))                arp_div_idx = (arp_div_idx+1)%4;
-                    // BPM is locked while a loop exists — changing it would drift
-                    // the click out of sync with already-recorded (ms-based) loops.
-                    else if (pt_in_rect(mouse_x, mouse_y, BTN_BPM_DOWN) && arp_bpm >  40 && looper.loop_len_ms == 0) { arp_bpm -= 5; apply_delay(); }
-                    else if (pt_in_rect(mouse_x, mouse_y, BTN_BPM_UP)   && arp_bpm < 240 && looper.loop_len_ms == 0) { arp_bpm += 5; apply_delay(); }
+                    else if (pt_in_rect(mouse_x, mouse_y, BTN_BPM_DOWN) && arp_bpm >  40) { arp_bpm -= 5; apply_delay(); }
+                    else if (pt_in_rect(mouse_x, mouse_y, BTN_BPM_UP)   && arp_bpm < 240) { arp_bpm += 5; apply_delay(); }
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_ARP_ORD))                arp_order = (ArpOrder)((arp_order+1)%4);
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_ARPOCT_DOWN) && arp_octaves > 1) arp_octaves--;
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_ARPOCT_UP)   && arp_octaves < 3) arp_octaves++;
@@ -109,21 +99,11 @@ int main(int argc, char **argv) {
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_FX_REV)) { rev_preset = (rev_preset+1)%4; apply_reverb(); }
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_FX_CHO)) { cho_preset = (cho_preset+1)%4; apply_chorus(); }
                     else if (pt_in_rect(mouse_x, mouse_y, BTN_FX_DLY)) { dly_preset = (dly_preset+1)%4; apply_delay();  }
-                    else if (pt_in_rect(mouse_x, mouse_y, BTN_LOOP_PLAY))   transport_toggle();
-                    else if (pt_in_rect(mouse_x, mouse_y, BTN_LOOP_REC))  { loop_rec_down(); rec_held = 1; }
-                    else if (pt_in_rect(mouse_x, mouse_y, BTN_LOOP_UNDO))   loop_undo_layer(looper.active_track);
-                    else if (pt_in_rect(mouse_x, mouse_y, BTN_LOOP_TOG)) {
-                        // Clear-all / panic — wipe every track and reset.
-                        for (int i = 0; i < NUM_LOOP_TRACKS; i++) loop_clear_track(i);
-                    }
+                    else if (pt_in_rect(mouse_x, mouse_y, BTN_METRO))       transport_toggle();
                     else {
-                        int lt = -1;
-                        for (int i = 0; i < NUM_LOOP_TRACKS; i++)
-                            if (pt_in_rect(mouse_x, mouse_y, BTN_LOOP_T[i])) { lt = i; break; }
-                        if (lt >= 0) { loop_select_track(lt); break; }
                         int dv = hit_dot(mouse_x, mouse_y);
                         if (dv >= 0) { voice_level = dv; break; }
-                        int rm = hit_row_mode_btn(mouse_x, mouse_y);
+                        int rm = piano_mode ? -1 : hit_row_mode_btn(mouse_x, mouse_y);
                         if (rm == 0) { upper_mode = (RowMode)((upper_mode+1)%3); retrigger_all_active(); break; }
                         if (rm == 1) { lower_mode = (RowMode)((lower_mode+1)%3); retrigger_all_active(); break; }
                         int pi = hit_pad(mouse_x, mouse_y);
@@ -134,7 +114,6 @@ int main(int argc, char **argv) {
 
             case SDL_MOUSEBUTTONUP:
                 if (ev.button.button == SDL_BUTTON_LEFT) {
-                    if (rec_held) { loop_rec_up(); rec_held = 0; }
                     if (mouse_pad >= 0) { release_chord(mouse_pad); mouse_pad = -1; }
                 }
                 break;
@@ -158,7 +137,8 @@ int main(int argc, char **argv) {
                 case SDLK_LEFTBRACKET:   if (octave_shift > -2) { octave_shift--; retrigger_all_active(); } break;
                 case SDLK_RIGHTBRACKET:  if (octave_shift <  2) { octave_shift++; retrigger_all_active(); } break;
                 case SDLK_BACKSLASH:     toggle_arp(); break;
-                case SDLK_SPACE:         if (!rec_held) { loop_rec_down(); rec_held = 1; } break;
+                case SDLK_p:             toggle_piano_mode(); break;
+                case SDLK_SPACE:         transport_toggle(); break;   // metronome on/off
                 default: {
                     int oi = key_to_ovr(ev.key.keysym.sym);
                     if (oi >= 0) { quality_override = oi; retrigger_all_active(); break; }
@@ -169,10 +149,6 @@ int main(int argc, char **argv) {
                 break;
 
             case SDL_KEYUP: {
-                if (ev.key.keysym.sym == SDLK_SPACE) {
-                    if (rec_held) { loop_rec_up(); rec_held = 0; }
-                    break;
-                }
                 int oi = key_to_ovr(ev.key.keysym.sym);
                 if (oi >= 0 && quality_override == oi) { quality_override = -1; retrigger_all_active(); break; }
                 int ci = find_ck(ev.key.keysym.sym);
