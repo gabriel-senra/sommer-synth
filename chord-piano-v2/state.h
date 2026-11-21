@@ -6,6 +6,16 @@
 typedef struct { SDL_Keycode key; int degree; int oct_off; const char *label; } ChordKey;
 extern const ChordKey CK[NUM_CK];
 
+// ── Piano mode ────────────────────────────────────────────────────────────────
+// Reinterpret the pads as a chromatic keyboard: bottom row = white keys, top row
+// = black keys (with gaps where no black key exists), K = white C an octave up.
+// current_key acts as a transpose; octave_shift still applies.
+#define PIANO_BASE 48
+extern const int PIANO_SEMI[NUM_CK];   // semitone offset per pad; -1 = gap (no key)
+extern int       piano_mode;
+int  piano_midi(int ci);               // MIDI note for pad ci, or -1 if a gap
+int  piano_is_black(int ci);           // 1 if pad ci is a black key
+
 // ── App state ─────────────────────────────────────────────────────────────────
 
 extern int     current_key;

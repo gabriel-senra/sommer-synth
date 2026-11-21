@@ -9,3 +9,4 @@ void trigger_chord(int ci);
 void release_chord(int ci);
 void retrigger_all_active(void);
 void toggle_arp(void);
+void toggle_piano_mode(void);

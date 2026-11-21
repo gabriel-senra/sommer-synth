@@ -1,11 +1,12 @@
 CC     = clang
-AMY    = ../test-amy/src
-BUILD  = ../piano/build
+AMY    = ../third_party/amy
+STB    = ../third_party/stb
+BUILD  = build
 
 CFLAGS = -O2 -Wall \
          -I$(AMY) \
          -I. \
-         -I../piano \
+         -I$(STB) \
          $(shell sdl2-config --cflags) \
          -DAMY_AUDIO_IS_MINIAUDIO=1 \
          -DMACOS
@@ -20,40 +21,33 @@ LDFLAGS = $(shell sdl2-config --libs) \
           -framework CoreGraphics \
           -lpthread -lm
 
-AMY_OBJS = \
-    $(BUILD)/amy.o \
-    $(BUILD)/api.o \
-    $(BUILD)/oscillators.o \
-    $(BUILD)/envelope.o \
-    $(BUILD)/filters.o \
-    $(BUILD)/algorithms.o \
-    $(BUILD)/pcm.o \
-    $(BUILD)/patches.o \
-    $(BUILD)/sequencer.o \
-    $(BUILD)/instrument.o \
-    $(BUILD)/delay.o \
-    $(BUILD)/parse.o \
-    $(BUILD)/transfer.o \
-    $(BUILD)/log2_exp2.o \
-    $(BUILD)/interp_partials.o \
-    $(BUILD)/midi_mappings.o \
-    $(BUILD)/custom.o \
-    $(BUILD)/libminiaudio-audio.o \
-    $(BUILD)/amy_midi.o \
-    $(BUILD)/macos_midi.o
+# AMY engine, compiled from the vendored source into build/amy/
+AMY_SRCS = amy api oscillators envelope filters algorithms pcm patches \
+           sequencer instrument delay parse transfer log2_exp2 \
+           interp_partials midi_mappings custom libminiaudio-audio amy_midi
+AMY_OBJS = $(AMY_SRCS:%=$(BUILD)/amy/%.o) $(BUILD)/amy/macos_midi.o
 
-SRCS = main.c state.c chords.c arp.c synth.c fx.c display.c looper.c transport.c
-OBJS = $(SRCS:.c=.o)
+SRCS = main.c state.c chords.c arp.c synth.c fx.c display.c transport.c
+OBJS = $(SRCS:%.c=$(BUILD)/%.o)
 
 all: chord_piano_v2
 
-%.o: %.c
+$(BUILD)/%.o: %.c | $(BUILD)/amy
 	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/amy/%.o: $(AMY)/%.c | $(BUILD)/amy
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD)/amy/macos_midi.o: $(AMY)/macos_midi.m | $(BUILD)/amy
+	$(CC) $(CFLAGS) -fobjc-arc -c $< -o $@
+
+$(BUILD)/amy:
+	mkdir -p $@
 
 chord_piano_v2: $(OBJS) $(AMY_OBJS)
 	$(CC) $^ $(LDFLAGS) -o $@
 
 clean:
-	rm -f $(OBJS) chord_piano.o chord_piano_v2
+	rm -rf $(BUILD) chord_piano_v2
 
 .PHONY: all clean

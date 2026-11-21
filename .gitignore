@@ -1,15 +1,16 @@
-# Compiled binaries
-chord-piano/chord_piano
+# Desktop build output
+chord-piano-v2/build/
 chord-piano-v2/chord_piano_v2
-chord-piano-v2/chord_piano
-piano/piano
 
-# Object files
-**/*.o
+# Firmware build output (Arduino / libDaisy)
+firmware/**/build/
+
+# Objects anywhere
+*.o
+*.elf
+*.bin
+*.hex
+*.map
 
 # macOS
 .DS_Store
-**/.DS_Store
-
-# Build artifacts
-**/build/

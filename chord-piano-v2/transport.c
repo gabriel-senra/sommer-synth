@@ -1,5 +1,4 @@
 #include "transport.h"
-#include "looper.h"
 #include "state.h"
 #include "amy.h"
 
@@ -37,19 +36,12 @@ void transport_init(void) {
 void transport_toggle(void) {
     if (transport.running) { transport.running = 0; return; }
     Uint32 now = SDL_GetTicks();
-    transport.running = 1;
-
-    if (looper.loop_len_ms == 0) {
-        // Fresh start: define a new grid from now and click the downbeat at once.
-        transport.anchor_ms    = now;
-        transport.anchor_set   = 1;
-        transport.cur_beat     = 0;
-        transport.last_tick_ms = now;
-        fire_click(1);
-    } else {
-        // A loop already owns the grid — resume in phase, no forced downbeat.
-        transport.last_tick_ms = now;
-    }
+    transport.running      = 1;
+    transport.anchor_ms    = now;   // start the grid now, click the downbeat at once
+    transport.anchor_set   = 1;
+    transport.cur_beat     = 0;
+    transport.last_tick_ms = now;
+    fire_click(1);
 }
 
 void transport_tick(void) {
@@ -67,21 +59,4 @@ void transport_tick(void) {
         fire_click(bib == 0);               // accent the downbeat
     }
     transport.last_tick_ms = now;
-}
-
-// Downbeat at or before t, on the transport grid.
-Uint32 transport_grid_origin(Uint32 t) {
-    Uint32 bar = transport_bar_ms();
-    if (!transport.anchor_set || bar == 0 || t < transport.anchor_ms) return t;
-    Uint32 bars = (t - transport.anchor_ms) / bar;
-    return transport.anchor_ms + bars * bar;
-}
-
-// Round a recorded span to the nearest whole number of bars (minimum one).
-Uint32 transport_snap_len(Uint32 span) {
-    Uint32 bar = transport_bar_ms();
-    if (bar == 0) return span;
-    Uint32 bars = (span + bar / 2) / bar;
-    if (bars < 1) bars = 1;
-    return bars * bar;
 }
