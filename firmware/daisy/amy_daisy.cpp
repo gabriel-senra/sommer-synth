@@ -171,7 +171,8 @@ int main(void)
 
     // Initialize Amy
     amy_config_t amy_config = amy_default_config();
-    amy_config.features.startup_bleep = 1; 
+    amy_config.features.startup_bleep = 1;
+    amy_config.audio = AMY_AUDIO_IS_NONE;  // libDaisy drives the codec; AMY just renders blocks
     amy_start(amy_config); // initializes amy 
 
     // Start the sequencer timer for AMY.
