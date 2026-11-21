@@ -27,7 +27,7 @@ const OvrVoicing OVR[8][4] = {
     /* 7 maj  */ { {{0,4,7},3},      {{0,4,7,11},4},      {{0,4,7,11,14},5},     {{0,4,7,11,14,17},6} },
 };
 
-const char *OVR_NAMES[8][4] = {
+static const char *OVR_NAMES[8][4] = {
     {"m","m7","m9","m11"}, {"7","7","9","11"},
     {"dim","dim7","dim9","dim11"}, {"9","9","9","11"},
     {"sus4","7sus4","9sus4","11sus4"}, {"6","6","6/9","6/11"},
@@ -40,13 +40,13 @@ const char *OVR_LABELS[7] = {
 
 // ── Pure functions ────────────────────────────────────────────────────────────
 
-int resolve_ovr(int ovr, int degree) {
+static int resolve_ovr(int ovr, int degree) {
     if (ovr != 0) return ovr;
     Quality q = DEGREE_QUALITY[degree];
     return (q == Q_MIN || q == Q_DIM) ? 7 : 0;
 }
 
-const char *quality_suffix(int degree, int vl_idx) {
+static const char *quality_suffix(int degree, int vl_idx) {
     static const char *maj[] = {"","maj7","maj9","maj11"};
     static const char *min[] = {"m","m7","m9","m11"};
     static const char *dom[] = {"","7","9","11"};
@@ -60,7 +60,7 @@ const char *quality_suffix(int degree, int vl_idx) {
     return "";
 }
 
-int compute_intervals(int degree, int voice_level, int *out) {
+static int compute_intervals(int degree, int voice_level, int *out) {
     int num = voice_level + 3;
     for (int i = 0; i < num; i++) {
         int pos = degree + i * 2;
