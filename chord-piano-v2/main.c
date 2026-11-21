@@ -10,7 +10,6 @@
 #include "fx.h"
 #include "transport.h"
 #include "display.h"
-#include "arp.h"
 
 static int key_to_ovr(SDL_Keycode k) {
     if (k >= SDLK_1 && k <= SDLK_7) return (int)(k - SDLK_1);
@@ -21,7 +20,7 @@ static int find_ck(SDL_Keycode k) {
     return -1;
 }
 
-// Master headroom. AMY sums every voice (live chord + bass + 4 loop synths) plus
+// Master headroom. AMY sums every voice (live keyboard + metronome click) plus
 // reverb/chorus/echo into one bus, then hard-clips at full scale. Hot patches blow
 // past the soft-clip knee into harsh flat-topping. Pulling the master below unity
 // keeps worst-case peaks in the smooth soft-clip region. Tune to taste (0.0..1.0).
@@ -162,7 +161,7 @@ int main(int argc, char **argv) {
         SDL_RenderPresent(ren);
     }
 
-    for (int i = 0; i < NUM_CK; i++) { arp_stop_note(i); release_chord(i); }
+    silence_all();
     SDL_DestroyRenderer(ren);
     SDL_DestroyWindow(win);
     SDL_Quit();

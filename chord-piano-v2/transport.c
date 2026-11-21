@@ -11,9 +11,6 @@ Transport transport = { 0 };
 #define METRO_NOTE_LO  79     // beats 2..N
 
 Uint32 transport_beat_ms(void) { return (Uint32)(60000 / arp_bpm); }
-Uint32 transport_bar_ms(void)  { return transport_beat_ms() * BEATS_PER_BAR; }
-
-int transport_active(void) { return transport.running; }
 
 // The click is a mallet sound with a natural decay, so no note-off is needed —
 // firing note-on each beat and letting the voices ring/steal is the whole sound.
@@ -38,14 +35,13 @@ void transport_toggle(void) {
     Uint32 now = SDL_GetTicks();
     transport.running      = 1;
     transport.anchor_ms    = now;   // start the grid now, click the downbeat at once
-    transport.anchor_set   = 1;
     transport.cur_beat     = 0;
     transport.last_tick_ms = now;
     fire_click(1);
 }
 
 void transport_tick(void) {
-    if (!transport.running || !transport.anchor_set) return;
+    if (!transport.running) return;
     Uint32 beat = transport_beat_ms();
     if (beat == 0) return;
 

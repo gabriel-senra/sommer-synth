@@ -1,6 +1,6 @@
 #include "arp.h"
 #include "state.h"
-#include "amy.h"
+#include "synth.h"
 #include <stdlib.h>
 
 const int   ARP_DIV_VAL[4]    = {1, 2, 4, 8};
@@ -10,13 +10,11 @@ const char *ARP_GATE_LBL[3]   = {"SHT","MED","LNG"};
 const float ARP_GATE_RATIO[3] = {0.2f, 0.5f, 0.9f};
 
 int arp_step_ms(void) { return 60000 / arp_bpm / ARP_DIV_VAL[arp_div_idx]; }
-int arp_gate_ms(void) { return (int)(arp_step_ms() * ARP_GATE_RATIO[arp_gate]); }
+static int arp_gate_ms(void) { return (int)(arp_step_ms() * ARP_GATE_RATIO[arp_gate]); }
 
 void arp_stop_note(int ci) {
     if (arp_st[ci].cur_note >= 0) {
-        amy_event e = amy_default_event();
-        e.synth = 0; e.midi_note = (float)arp_st[ci].cur_note; e.velocity = 0.0f;
-        amy_add_event(&e);
+        amy_note_off_midi(arp_st[ci].cur_note);
         arp_st[ci].cur_note = -1;
     }
 }
@@ -28,10 +26,9 @@ void arp_init_key(int ci) {
     arp_st[ci].dir         = 1;
     arp_st[ci].next_ms     = SDL_GetTicks();
     arp_st[ci].note_off_ms = 0;
-    arp_st[ci].held        = 1;
 }
 
-void arp_advance(int ci, int total) {
+static void arp_advance(int ci, int total) {
     switch (arp_order) {
         case ARP_UP:
             arp_st[ci].pos = (arp_st[ci].pos + 1) % total; break;
@@ -67,9 +64,7 @@ void arp_tick(void) {
             int midi = base + oct;
             if (midi >= 0 && midi <= 127) {
                 arp_stop_note(i);
-                amy_event e = amy_default_event();
-                e.synth = 0; e.midi_note = (float)midi; e.velocity = 0.75f;
-                amy_add_event(&e);
+                amy_note_on_midi(midi);
                 arp_st[i].cur_note    = midi;
                 arp_st[i].note_off_ms = now + gate_ms;
             }

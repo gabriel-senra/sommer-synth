@@ -10,7 +10,6 @@
 
 typedef struct {
     int    running;          // metronome click on/off
-    int    anchor_set;       // has the grid origin ever been established
     Uint32 anchor_ms;        // grid origin — a downbeat sits exactly here
     Uint32 last_tick_ms;     // previous frame's time (for beat-cross detection)
     int    cur_beat;         // 0..BEATS_PER_BAR-1, for the UI beat indicator
@@ -18,12 +17,10 @@ typedef struct {
 
 extern Transport transport;
 
-// Grid maths (derived live from arp_bpm).
+// Beat length, derived live from arp_bpm.
 Uint32 transport_beat_ms(void);
-Uint32 transport_bar_ms(void);
 
 // Lifecycle / control.
 void transport_init(void);      // load the click patch into METRO_SYNTH (once)
 void transport_toggle(void);    // PLAY / STOP button
 void transport_tick(void);      // fire clicks + advance cur_beat; call each frame
-int  transport_active(void);    // metronome currently running?

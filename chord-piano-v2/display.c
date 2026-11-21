@@ -29,6 +29,7 @@ const SDL_Color OVR_COL[7] = {
 const SDL_Color MODE_COL[3]      = {{40,40,40,255},{20,50,90,255},{80,50,10,255}};
 const SDL_Color MODE_TEXT_COL[3] = {{50,50,50,255},{0,120,210,255},{200,120,0,255}};
 
+
 // ── Button rects ──────────────────────────────────────────────────────────────
 
 const SDL_Rect BTN_KEY_PREV   = { 12,  9, 24, 26};
@@ -55,7 +56,7 @@ const SDL_Rect BTN_FX_CHO = {150, FX_BTN_Y, 52, FX_BTN_H};
 const SDL_Rect BTN_FX_DLY = {238, FX_BTN_Y, 52, FX_BTN_H};
 
 // Metronome row: [PLAY] ●●●●
-const SDL_Rect BTN_METRO       = { 12, LOOP_BTN_Y,  46, LOOP_BTN_H};
+const SDL_Rect BTN_METRO  = { 12, METRO_BTN_Y, 46, METRO_BTN_H};
 
 // ── Low-level draw helpers ────────────────────────────────────────────────────
 
@@ -88,18 +89,41 @@ static void draw_text(SDL_Renderer *r, int x, int y, float sc,
     }
 }
 
-int text_width(const char *s, float sc) {
+static int text_width(const char *s, float sc) {
     return (int)(stb_easy_font_width((char*)s) * sc);
 }
 int pt_in_rect(int px, int py, SDL_Rect re) {
     return px >= re.x && px < re.x+re.w && py >= re.y && py < re.y+re.h;
 }
+static int hovered(SDL_Rect b) { return pt_in_rect(mouse_x, mouse_y, b); }
 
-static void draw_arrow_btn(SDL_Renderer *r, SDL_Rect btn, const char *lbl, int hov) {
-    fill_rect(r, btn.x, btn.y, btn.w, btn.h, hov ? C_SURF : C_BG);
-    draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, C_BORDER);
-    draw_text(r, btn.x+(btn.w-text_width(lbl,1.5f))/2,
-                 btn.y+(btn.h-(int)(13*1.5f))/2, 1.5f, lbl, hov ? C_HI : C_MID);
+// Outlined box with a centred label — every button is one of these.
+static void draw_btn(SDL_Renderer *r, SDL_Rect b, const char *lbl, float sc,
+                     SDL_Color fill, SDL_Color border, SDL_Color text) {
+    fill_rect(r, b.x, b.y, b.w, b.h, fill);
+    draw_rect_outline(r, b.x, b.y, b.w, b.h, border);
+    draw_text(r, b.x+(b.w-text_width(lbl,sc))/2, b.y+(b.h-(int)(13*sc))/2, sc, lbl, text);
+}
+// Momentary arrow (< > - +).
+static void draw_arrow_btn(SDL_Renderer *r, SDL_Rect b, const char *lbl) {
+    int h = hovered(b);
+    draw_btn(r, b, lbl, 1.5f, h ? C_SURF : C_BG, C_BORDER, h ? C_HI : C_MID);
+}
+// Shows the current value of a setting; click cycles it.
+static void draw_value_btn(SDL_Renderer *r, SDL_Rect b, const char *lbl) {
+    draw_btn(r, b, lbl, 1.3f, hovered(b) ? C_SURF : C_BG, C_BORDER, C_HI);
+}
+// On/off: filled with on_col while active.
+static void draw_toggle_btn(SDL_Renderer *r, SDL_Rect b, const char *lbl, float sc,
+                            int on, SDL_Color on_col, SDL_Color on_text) {
+    int h = hovered(b);
+    draw_btn(r, b, lbl, sc, on ? on_col : (h ? C_SURF : C_BG),
+             on ? on_col : C_BORDER, on ? on_text : (h ? C_HI : C_MID));
+}
+// A value label centred in the gap between a lo/hi button pair.
+static void draw_between(SDL_Renderer *r, SDL_Rect lo, SDL_Rect hi, int y, float sc,
+                         const char *s, SDL_Color c) {
+    draw_text(r, lo.x+lo.w+(hi.x-lo.x-lo.w-text_width(s,sc))/2, y, sc, s, c);
 }
 
 // ── Pad + dot geometry ────────────────────────────────────────────────────────
@@ -118,10 +142,7 @@ int hit_pad(int mx, int my) {
     return -1;
 }
 int hit_dot(int mx, int my) {
-    for (int v = 0; v <= KNOB_MAX; v++) {
-        SDL_Rect d = dot_rect(v);
-        if (pt_in_rect(mx, my, d)) return v;
-    }
+    for (int v = 0; v <= KNOB_MAX; v++) if (pt_in_rect(mx, my, dot_rect(v))) return v;
     return -1;
 }
 int hit_row_mode_btn(int mx, int my) {
@@ -149,53 +170,33 @@ static void render_voice_dots(SDL_Renderer *r) {
 static void render_topbar(SDL_Renderer *r) {
     fill_rect(r, 0, 0, WIN_W, TOP_H, C_BG);
     hline(r, TOP_H, C_SEP);
-    int kp = pt_in_rect(mouse_x, mouse_y, BTN_KEY_PREV);
-    int kn = pt_in_rect(mouse_x, mouse_y, BTN_KEY_NEXT);
-    draw_arrow_btn(r, BTN_KEY_PREV, "<", kp);
-    draw_arrow_btn(r, BTN_KEY_NEXT, ">", kn);
+    draw_arrow_btn(r, BTN_KEY_PREV, "<");
+    draw_arrow_btn(r, BTN_KEY_NEXT, ">");
     char key_lbl[20];
     snprintf(key_lbl, sizeof(key_lbl), "%s %s", KEY_NAMES[current_key],
              piano_mode ? "PIANO" : "MAJOR");
-    float ksc = 2.2f; int klw = text_width(key_lbl, ksc);
-    int klx = BTN_KEY_PREV.x+BTN_KEY_PREV.w+(BTN_KEY_NEXT.x-BTN_KEY_PREV.x-BTN_KEY_PREV.w-klw)/2;
-    draw_text(r, klx, TOP_H/2-(int)(13*ksc)/2+1, ksc, key_lbl, C_WHITE);
-    int pp = pt_in_rect(mouse_x, mouse_y, BTN_PATCH_PREV);
-    int pn = pt_in_rect(mouse_x, mouse_y, BTN_PATCH_NEXT);
-    draw_arrow_btn(r, BTN_PATCH_PREV, "<", pp);
-    draw_arrow_btn(r, BTN_PATCH_NEXT, ">", pn);
+    draw_between(r, BTN_KEY_PREV, BTN_KEY_NEXT, TOP_H/2-(int)(13*2.2f)/2+1, 2.2f, key_lbl, C_WHITE);
+    draw_arrow_btn(r, BTN_PATCH_PREV, "<");
+    draw_arrow_btn(r, BTN_PATCH_NEXT, ">");
     char ptch[16]; snprintf(ptch, sizeof(ptch), "#%03d", current_patch);
     draw_text(r, BTN_PATCH_PREV.x-58, TOP_H/2-(int)(13*1.3f)/2+1, 1.3f, "PATCH", C_DIM);
-    float psc = 1.8f; int plw = text_width(ptch, psc);
-    int plx = BTN_PATCH_PREV.x+BTN_PATCH_PREV.w+(BTN_PATCH_NEXT.x-BTN_PATCH_PREV.x-BTN_PATCH_PREV.w-plw)/2;
-    draw_text(r, plx, TOP_H/2-(int)(13*psc)/2+1, psc, ptch, C_MID);
+    draw_between(r, BTN_PATCH_PREV, BTN_PATCH_NEXT, TOP_H/2-(int)(13*1.8f)/2+1, 1.8f, ptch, C_MID);
 }
 
 static void render_controls(SDL_Renderer *r) {
     fill_rect(r, 0, CTRL_Y, WIN_W, CTRL_H, C_BG);
     hline(r, CTRL_Y+CTRL_H, C_SEP);
     render_voice_dots(r);
-    SDL_Rect bb = BTN_BASS; int bh = pt_in_rect(mouse_x, mouse_y, bb);
-    SDL_Color bf = bass_on ? C_ACCENT : (bh ? C_SURF : C_BG);
-    fill_rect(r, bb.x, bb.y, bb.w, bb.h, bf);
-    draw_rect_outline(r, bb.x, bb.y, bb.w, bb.h, bass_on ? C_ACCENT : C_BORDER);
-    draw_text(r, bb.x+(bb.w-text_width("BASS",1.5f))/2,
-                 bb.y+(bb.h-(int)(13*1.5f))/2, 1.5f, "BASS", bass_on ? C_WHITE : C_MID);
+    draw_toggle_btn(r, BTN_BASS, "BASS", 1.5f, bass_on, C_ACCENT, C_WHITE);
     draw_text(r, BTN_OCT_DOWN.x, BTN_OCT_DOWN.y-12, 1.2f, "OCT", C_DIM);
-    draw_arrow_btn(r, BTN_OCT_DOWN, "-", pt_in_rect(mouse_x, mouse_y, BTN_OCT_DOWN));
-    draw_arrow_btn(r, BTN_OCT_UP,   "+", pt_in_rect(mouse_x, mouse_y, BTN_OCT_UP));
+    draw_arrow_btn(r, BTN_OCT_DOWN, "-");
+    draw_arrow_btn(r, BTN_OCT_UP,   "+");
     char oct_str[8]; snprintf(oct_str, sizeof(oct_str), "%+d", octave_shift);
-    int otw = text_width(oct_str, 1.8f);
-    int ocx = BTN_OCT_DOWN.x+BTN_OCT_DOWN.w+(BTN_OCT_UP.x-BTN_OCT_DOWN.x-BTN_OCT_DOWN.w-otw)/2;
-    draw_text(r, ocx, CTRL_Y+(CTRL_H-(int)(13*1.8f))/2, 1.8f, oct_str,
-              octave_shift ? C_HI : C_MID);
+    draw_between(r, BTN_OCT_DOWN, BTN_OCT_UP, CTRL_Y+(CTRL_H-(int)(13*1.8f))/2, 1.8f,
+                 oct_str, octave_shift ? C_HI : C_MID);
     // MODE toggle — SCALE (diatonic chords) / PIANO (chromatic keys)
-    { SDL_Rect mb = BTN_MODE; int mh = pt_in_rect(mouse_x, mouse_y, mb);
-      const char *mlbl = piano_mode ? "PIANO" : "SCALE";
-      fill_rect(r, mb.x, mb.y, mb.w, mb.h, piano_mode ? C_ACCENT : (mh ? C_SURF : C_BG));
-      draw_rect_outline(r, mb.x, mb.y, mb.w, mb.h, piano_mode ? C_ACCENT : C_BORDER);
-      draw_text(r, mb.x+(mb.w-text_width(mlbl,1.5f))/2,
-                   mb.y+(mb.h-(int)(13*1.5f))/2, 1.5f, mlbl,
-                piano_mode ? C_WHITE : C_MID); }
+    draw_toggle_btn(r, BTN_MODE, piano_mode ? "PIANO" : "SCALE", 1.5f,
+                    piano_mode, C_ACCENT, C_WHITE);
     for (int i = 0; i < NUM_CK; i++) {
         if (!actv[i].active) continue;
         char cname[24];
@@ -218,14 +219,11 @@ static void render_modifier_strip(SDL_Renderer *r) {
     hline(r, MOD_Y+MOD_H, C_SEP);
     for (int i = 0; i < 7; i++) {
         SDL_Rect btn = {MOD_BTN_X0+i*(MOD_BTN_W+MOD_BTN_GAP), MOD_BTN_Y, MOD_BTN_W, MOD_BTN_H};
-        int hov = pt_in_rect(mouse_x, mouse_y, btn), act = (quality_override == i);
-        fill_rect(r, btn.x, btn.y, btn.w, btn.h,
-                  act ? OVR_COL[i] : (hov ? C_SURF : C_BG));
-        draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h,
-                          act ? OVR_COL[i] : (hov ? C_BORDER : C_DIM));
-        draw_text(r, btn.x+(btn.w-text_width(OVR_LABELS[i],1.3f))/2,
-                     btn.y+(btn.h-(int)(13*1.3f))/2, 1.3f, OVR_LABELS[i],
-                     act ? C_WHITE : (hov ? C_MID : C_DIM));
+        int hov = hovered(btn), act = (quality_override == i);
+        draw_btn(r, btn, OVR_LABELS[i], 1.3f,
+                 act ? OVR_COL[i] : (hov ? C_SURF : C_BG),
+                 act ? OVR_COL[i] : (hov ? C_BORDER : C_DIM),
+                 act ? C_WHITE : (hov ? C_MID : C_DIM));
     }
 }
 
@@ -234,68 +232,28 @@ static void render_arp_row(SDL_Renderer *r) {
     hline(r, ARP_Y+ARP_H, C_SEP);
     int ty = ARP_BTN_Y + (ARP_BTN_H-(int)(13*1.3f))/2;
 
-    { SDL_Rect btn = BTN_ARP_TOG;
-      SDL_Color fill = arp_on ? C_ACCENT : (pt_in_rect(mouse_x,mouse_y,btn) ? C_SURF : C_BG);
-      fill_rect(r, btn.x, btn.y, btn.w, btn.h, fill);
-      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, arp_on ? C_ACCENT : C_BORDER);
-      draw_text(r, btn.x+(btn.w-text_width("ARP",1.3f))/2, ty, 1.3f, "ARP",
-                arp_on ? C_WHITE : C_MID); }
-
+    draw_toggle_btn(r, BTN_ARP_TOG, "ARP", 1.3f, arp_on, C_ACCENT, C_WHITE);
     if (!arp_on) { draw_text(r, 62, ty, 1.2f, "ARPEGGIATE OFF", C_DIM); return; }
 
     draw_text(r, 62, ty, 1.2f, "DIV", C_DIM);
-    { SDL_Rect btn = BTN_ARP_DIV; int hov = pt_in_rect(mouse_x, mouse_y, btn);
-      fill_rect(r, btn.x, btn.y, btn.w, btn.h, hov ? C_SURF : C_BG);
-      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, C_BORDER);
-      draw_text(r, btn.x+(btn.w-text_width(ARP_DIV_LBL[arp_div_idx],1.3f))/2,
-                ty, 1.3f, ARP_DIV_LBL[arp_div_idx], C_HI); }
+    draw_value_btn(r, BTN_ARP_DIV, ARP_DIV_LBL[arp_div_idx]);
 
     draw_text(r, 136, ty, 1.2f, "BPM", C_DIM);
-    draw_arrow_btn(r, BTN_BPM_DOWN, "<", pt_in_rect(mouse_x, mouse_y, BTN_BPM_DOWN));
-    draw_arrow_btn(r, BTN_BPM_UP,   ">", pt_in_rect(mouse_x, mouse_y, BTN_BPM_UP));
-    { char s[8]; snprintf(s, sizeof(s), "%d", arp_bpm);
-      int tw = text_width(s, 1.5f);
-      int cx = BTN_BPM_DOWN.x+BTN_BPM_DOWN.w+(BTN_BPM_UP.x-BTN_BPM_DOWN.x-BTN_BPM_DOWN.w-tw)/2;
-      draw_text(r, cx, ty, 1.5f, s, C_WHITE); }
+    draw_arrow_btn(r, BTN_BPM_DOWN, "<");
+    draw_arrow_btn(r, BTN_BPM_UP,   ">");
+    char bpm[8]; snprintf(bpm, sizeof(bpm), "%d", arp_bpm);
+    draw_between(r, BTN_BPM_DOWN, BTN_BPM_UP, ty, 1.5f, bpm, C_WHITE);
 
-    { SDL_Rect btn = BTN_ARP_ORD; int hov = pt_in_rect(mouse_x, mouse_y, btn);
-      fill_rect(r, btn.x, btn.y, btn.w, btn.h, hov ? C_SURF : C_BG);
-      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, C_BORDER);
-      draw_text(r, btn.x+(btn.w-text_width(ARP_ORD_LBL[(int)arp_order],1.3f))/2,
-                ty, 1.3f, ARP_ORD_LBL[(int)arp_order], C_HI); }
+    draw_value_btn(r, BTN_ARP_ORD, ARP_ORD_LBL[(int)arp_order]);
 
     draw_text(r, 298, ty, 1.2f, "OCT", C_DIM);
-    draw_arrow_btn(r, BTN_ARPOCT_DOWN, "<", pt_in_rect(mouse_x, mouse_y, BTN_ARPOCT_DOWN));
-    draw_arrow_btn(r, BTN_ARPOCT_UP,   ">", pt_in_rect(mouse_x, mouse_y, BTN_ARPOCT_UP));
-    { char s[4]; snprintf(s, sizeof(s), "%d", arp_octaves);
-      int tw = text_width(s, 1.5f);
-      int cx = BTN_ARPOCT_DOWN.x+BTN_ARPOCT_DOWN.w+(BTN_ARPOCT_UP.x-BTN_ARPOCT_DOWN.x-BTN_ARPOCT_DOWN.w-tw)/2;
-      draw_text(r, cx, ty, 1.5f, s, C_WHITE); }
+    draw_arrow_btn(r, BTN_ARPOCT_DOWN, "<");
+    draw_arrow_btn(r, BTN_ARPOCT_UP,   ">");
+    char oct[4]; snprintf(oct, sizeof(oct), "%d", arp_octaves);
+    draw_between(r, BTN_ARPOCT_DOWN, BTN_ARPOCT_UP, ty, 1.5f, oct, C_WHITE);
 
-    { SDL_Rect btn = BTN_ARP_GATE; int hov = pt_in_rect(mouse_x, mouse_y, btn);
-      fill_rect(r, btn.x, btn.y, btn.w, btn.h, hov ? C_SURF : C_BG);
-      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, C_BORDER);
-      draw_text(r, btn.x+(btn.w-text_width(ARP_GATE_LBL[arp_gate],1.3f))/2,
-                ty, 1.3f, ARP_GATE_LBL[arp_gate], C_HI); }
-
-    { SDL_Rect btn = BTN_ARP_HOLD;
-      SDL_Color fill = arp_hold ? C_WHITE : (pt_in_rect(mouse_x,mouse_y,btn) ? C_SURF : C_BG);
-      fill_rect(r, btn.x, btn.y, btn.w, btn.h, fill);
-      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, arp_hold ? C_WHITE : C_BORDER);
-      draw_text(r, btn.x+(btn.w-text_width("HOLD",1.3f))/2, ty, 1.3f, "HOLD",
-                arp_hold ? C_BLACK : C_MID); }
-}
-
-static void render_fx_cycle_btn(SDL_Renderer *r, SDL_Rect btn,
-                                 const char *const *labels, int preset) {
-    int hov = pt_in_rect(mouse_x, mouse_y, btn);
-    int act = preset > 0;
-    fill_rect(r, btn.x, btn.y, btn.w, btn.h,
-              act ? C_WHITE : (hov ? C_SURF : C_BG));
-    draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, act ? C_WHITE : C_BORDER);
-    draw_text(r, btn.x+(btn.w-text_width(labels[preset],1.3f))/2,
-                 btn.y+(btn.h-(int)(13*1.3f))/2,
-              1.3f, labels[preset], act ? C_BLACK : (hov ? C_HI : C_MID));
+    draw_value_btn(r, BTN_ARP_GATE, ARP_GATE_LBL[arp_gate]);
+    draw_toggle_btn(r, BTN_ARP_HOLD, "HOLD", 1.3f, arp_hold, C_WHITE, C_BLACK);
 }
 
 static void render_fx_row(SDL_Renderer *r) {
@@ -304,31 +262,25 @@ static void render_fx_row(SDL_Renderer *r) {
     int ty = FX_BTN_Y + (FX_BTN_H-(int)(13*1.2f))/2;
     draw_text(r, 14,  ty, 1.2f, "FX",  C_DIM);
     draw_text(r, 40,  ty, 1.2f, "REV", C_DIM);
-    render_fx_cycle_btn(r, BTN_FX_REV, REV_LABELS, rev_preset);
+    draw_toggle_btn(r, BTN_FX_REV, REV_LABELS[rev_preset], 1.3f, rev_preset > 0, C_WHITE, C_BLACK);
     draw_text(r, 128, ty, 1.2f, "CHO", C_DIM);
-    render_fx_cycle_btn(r, BTN_FX_CHO, CHO_LABELS, cho_preset);
+    draw_toggle_btn(r, BTN_FX_CHO, CHO_LABELS[cho_preset], 1.3f, cho_preset > 0, C_WHITE, C_BLACK);
     draw_text(r, 216, ty, 1.2f, "DLY", C_DIM);
-    render_fx_cycle_btn(r, BTN_FX_DLY, DLY_LABELS, dly_preset);
+    draw_toggle_btn(r, BTN_FX_DLY, DLY_LABELS[dly_preset], 1.3f, dly_preset > 0, C_WHITE, C_BLACK);
     if (dly_preset > 0) {
         char hint[24];
-        float ms = (dly_preset == 1) ? 60000.0f/arp_bpm*0.5f
-                 : (dly_preset == 2) ? 60000.0f/arp_bpm
-                                     : 60000.0f/arp_bpm*1.5f;
-        snprintf(hint, sizeof(hint), "%.0fms", ms);
+        snprintf(hint, sizeof(hint), "%.0fms", fx_delay_ms());
         draw_text(r, 298, ty, 1.2f, hint, C_DIM);
     }
 }
 
 static void render_mode_badge(SDL_Renderer *r, int row_y, RowMode mode) {
     SDL_Rect btn = {MODE_BTN_X, row_y-1, MODE_BTN_W, MODE_BTN_H};
-    int hov = pt_in_rect(mouse_x, mouse_y, btn);
-    fill_rect(r, btn.x, btn.y, btn.w, btn.h, hov ? C_SURF : (SDL_Color){22,22,22,255});
-    draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h,
-                      mode == ROW_CHORD ? C_BORDER : MODE_COL[(int)mode]);
-    SDL_Color tc = hov ? C_HI : MODE_TEXT_COL[(int)mode];
-    const char *lbl = row_mode_name(mode);
-    draw_text(r, btn.x+(btn.w-text_width(lbl,1.2f))/2,
-                 btn.y+(btn.h-(int)(13*1.2f))/2+1, 1.2f, lbl, tc);
+    int hov = hovered(btn);
+    draw_btn(r, btn, row_mode_name(mode), 1.2f,
+             hov ? C_SURF : (SDL_Color){22,22,22,255},
+             mode == ROW_CHORD ? C_BORDER : MODE_COL[(int)mode],
+             hov ? C_HI : MODE_TEXT_COL[(int)mode]);
 }
 
 static void render_pads(SDL_Renderer *r) {
@@ -346,7 +298,7 @@ static void render_pads(SDL_Renderer *r) {
 
     for (int i = 0; i < NUM_CK; i++) {
         SDL_Rect pad = pad_rect(i);
-        int held = actv[i].active, hov = pt_in_rect(mouse_x, mouse_y, pad);
+        int held = actv[i].active, hov = hovered(pad);
 
         if (piano_mode) {
             int m = piano_midi(i);
@@ -371,7 +323,7 @@ static void render_pads(SDL_Renderer *r) {
             }
             fill_rect(r, pad.x, pad.y, pad.w, pad.h, fill);
             draw_rect_outline(r, pad.x, pad.y, pad.w, pad.h, bord);
-            char nm[8]; snprintf(nm, sizeof(nm), "%s", KEY_NAMES[m % 12]);
+            const char *nm = KEY_NAMES[m % 12];
             float nsc = 2.0f;
             draw_text(r, pad.x+(pad.w-text_width(nm,nsc))/2,
                          pad.y+(pad.h-(int)(13*nsc))/2-6, nsc, nm, text_col);
@@ -433,28 +385,22 @@ static void render_pads(SDL_Renderer *r) {
 // ── Metronome row ─────────────────────────────────────────────────────────────
 
 static void render_metro_row(SDL_Renderer *r) {
-    fill_rect(r, 0, LOOP_Y, WIN_W, LOOP_H, C_BG);
-    hline(r, LOOP_Y + LOOP_H, C_SEP);
+    fill_rect(r, 0, METRO_Y, WIN_W, METRO_H, C_BG);
+    hline(r, METRO_Y + METRO_H, C_SEP);
 
-    int ty = LOOP_BTN_Y + (LOOP_BTN_H - (int)(13*1.3f)) / 2;
-
-    // [PLAY/STOP] metronome toggle + 4-beat indicator
-    { SDL_Rect btn = BTN_METRO;
-      int hov = pt_in_rect(mouse_x, mouse_y, btn);
-      int on  = transport_active();
-      fill_rect(r, btn.x, btn.y, btn.w, btn.h, on ? C_HI : (hov ? C_SURF : C_BG));
-      draw_rect_outline(r, btn.x, btn.y, btn.w, btn.h, on ? C_HI : C_BORDER);
-      const char *lbl = on ? "STOP" : "PLAY";
-      draw_text(r, btn.x+(btn.w-text_width(lbl,1.2f))/2, ty, 1.2f, lbl,
-                on ? C_BLACK : C_MID);
-      int dx = btn.x + btn.w + 12;
-      int dy = LOOP_BTN_Y + (LOOP_BTN_H - 8) / 2;
-      for (int b = 0; b < BEATS_PER_BAR; b++) {
-          int lit = on && (transport.cur_beat == b);
-          SDL_Color dc = lit ? (b == 0 ? C_ACCENT : C_WHITE) : (SDL_Color){40,40,40,255};
-          fill_rect(r, dx + b*14, dy, 8, 8, dc);
-      }
-      draw_text(r, dx + BEATS_PER_BAR*14 + 8, ty, 1.2f, "METRONOME", C_DIM); }
+    // [PLAY/STOP] toggle + 4-beat indicator
+    int on = transport.running;
+    SDL_Rect btn = BTN_METRO;
+    draw_toggle_btn(r, btn, on ? "STOP" : "PLAY", 1.2f, on, C_HI, C_BLACK);
+    int dx = btn.x + btn.w + 12;
+    int dy = METRO_BTN_Y + (METRO_BTN_H - 8) / 2;
+    for (int b = 0; b < BEATS_PER_BAR; b++) {
+        int lit = on && (transport.cur_beat == b);
+        SDL_Color dc = lit ? (b == 0 ? C_ACCENT : C_WHITE) : (SDL_Color){40,40,40,255};
+        fill_rect(r, dx + b*14, dy, 8, 8, dc);
+    }
+    int ty = METRO_BTN_Y + (METRO_BTN_H - (int)(13*1.3f)) / 2;
+    draw_text(r, dx + BEATS_PER_BAR*14 + 8, ty, 1.2f, "METRONOME", C_DIM);
 }
 
 // ── Public entry point ────────────────────────────────────────────────────────

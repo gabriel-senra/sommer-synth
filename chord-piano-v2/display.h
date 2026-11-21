@@ -7,7 +7,6 @@
 #define WIN_W  900
 #define WIN_H  466
 
-#define TOP_Y  0
 #define TOP_H  44
 #define CTRL_Y (TOP_H + 1)
 #define CTRL_H 40
@@ -29,12 +28,12 @@
 #define K_W      40
 #define K_PAD_X  (PAD_X0 + 7*(PAD_W+PAD_GAP) + 14)
 
-#define LOOP_Y        (FX_Y + FX_H + 1)
-#define LOOP_H        28
-#define LOOP_BTN_H    20
-#define LOOP_BTN_Y    (LOOP_Y + (LOOP_H - LOOP_BTN_H) / 2)
+#define METRO_Y       (FX_Y + FX_H + 1)
+#define METRO_H       28
+#define METRO_BTN_H   20
+#define METRO_BTN_Y   (METRO_Y + (METRO_H - METRO_BTN_H) / 2)
 
-#define UPPER_LABEL_Y (LOOP_Y + LOOP_H + 3)
+#define UPPER_LABEL_Y (METRO_Y + METRO_H + 3)
 #define UPPER_PAD_Y   (UPPER_LABEL_Y + 14 + 2)
 #define LOWER_LABEL_Y (UPPER_PAD_Y + PAD_H + 8)
 #define LOWER_PAD_Y   (LOWER_LABEL_Y + 14 + 2)
@@ -89,7 +88,6 @@ extern const SDL_Rect BTN_METRO;       // metronome play/stop
 // ── Hit-testing (used by main event loop) ────────────────────────────────────
 
 int pt_in_rect(int px, int py, SDL_Rect re);
-int text_width(const char *s, float sc);
 int hit_pad(int mx, int my);
 int hit_dot(int mx, int my);
 int hit_row_mode_btn(int mx, int my);
